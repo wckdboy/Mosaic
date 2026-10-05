@@ -9,7 +9,7 @@ Local first. Open source. No Mosaic account.
 
 <img src="docs/mosaic-icon.svg" width="96" alt="Mosaic five-tile icon">
 
-[Getting started](#getting-started) · [What works](#what-works) · [Cloud storage](#cloud-storage) · [Development](#development) · [Privacy](PRIVACY.md)
+[Getting started](#getting-started) · [What works](#what-works) · [Cloud storage](#cloud-storage) · [Development](#development) · [Roadmap](ROADMAP.md) · [Privacy](PRIVACY.md)
 
 </div>
 
