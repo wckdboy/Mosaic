@@ -26,25 +26,27 @@ Screenshots use simulator sample media. No sample media ships with the app.
 
 - Photos access with full or limited permission, plus media opened through Files.
 - Recursive discovery in folders you explicitly connect—including nested Downloads folders.
-- Horizontal or vertical gallery browsing, adjustable density, date grouping, filename/format/year search, and sorting.
+- Horizontal or vertical gallery browsing with free momentum scrolling, adjustable density, date grouping, search by filename, format, year, or analyzed content, and sorting.
 - Favorites, named collections, multi-selection, and quick organization actions.
-- Full-screen viewing with pinch/double-tap zoom, directional paging, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
+- Full-screen viewing with pinch/double-tap zoom, swipe paging and swipe-down to close, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
 
 ### Mosaic canvas
 
 Choose the **Mosaic button in Library**. Library and Collections are the two main destinations; Files and cloud sources live in Settings → Connections.
 
-A free-panning, zoomable canvas groups media by **color**, **name**, **visual similarity**, or **text sentiment**. Large and small tiles form a stable mosaic within each group. Search filenames or recognized text, then narrow by media type, favorites, or source from one compact filter menu.
+A free-panning, zoomable two-dimensional canvas arranges media as islands grouped by **color**, **theme**, **visual similarity**, **name**, or **text sentiment**. Islands are packed into a roughly square world and color islands follow the color wheel, so you can pan in any direction; pinch, double-tap, or use **Show all** for a map-like overview. Search filenames, recognized text, and analyzed content ("beach", "dog", "blue", "2024"), then narrow by media type, favorites, or source.
 
-Tap **Find similar** in any library media viewer, or long-press a gallery tile, to explore related photos, videos, animations, and Live Photos around that reference. A thumbnail breadcrumb keeps the starting point visible. Choose composition, color, name, or text sentiment; closing discovery returns to the same item. Similarity excludes the reference and returns up to 200 ranked results across media types, with a clearly labeled name fallback when the reference cannot be analyzed.
+**Tap any tile to explore.** The canvas re-centers on that item as a large reference tile, with its closest matches spiraling outward: the farther you pan, the less similar the media. Switch between Similar, Color, Theme, and Name matching with the chips. Tap another tile to hop again; Back walks the trail and restores each previous viewport. Tap the reference (or **Open**) to view it full screen, or long-press any tile for Open, Explore similar, and Favorite. **Find similar** in the viewer and gallery opens the same discovery view.
 
-The canvas recycles cells in both axes. A spatial index finds visible frames; it does not inspect every item on each pan. Color and composition analysis uses small local Photos thumbnails or already cached Files thumbnails, in cancellable batches of up to 500. Compact descriptors are cached on disk. Originals are not decoded just to arrange the canvas. An explicit Find similar action may load the reference’s authorized Files thumbnail.
+The canvas recycles cells in both axes. Geometry is computed once per content change in unscaled coordinates with a spatial hash; zooming only rescales the queried region, so pinching costs work proportional to visible tiles. Photos thumbnails for upcoming tiles are prefetched, tiles request resolution appropriate to the zoom level, and analyzed dominant colors paint placeholders before pixels arrive.
 
-Similarity uses a perceptual composition hash, not face identification or semantic object recognition. Sentiment uses filenames and optional recognized text; it does **not** infer anyone’s emotions. Items that cannot be analyzed remain visible in **Not analyzed**. More batches can be requested from the canvas toolbar.
+Analysis runs on-device in the background whenever **Analyze photos on this iPhone** is on (Settings), newest first, with bounded concurrency. It pauses when Mosaic leaves the foreground and slows under thermal pressure or Low Power Mode. Each item gets a dominant color palette, Apple Vision scene labels mapped to themes, and a Vision feature print for semantic similarity, all computed from ~300 px thumbnails. Photos requests never download iCloud originals, and cloud-only Files are skipped. Descriptors are cached on disk and checkpointed. When new analysis is ready, a **New matches ready** pill offers to refresh rather than rearranging tiles under your finger. Vision scene and feature models require a physical device; on Simulator, color and composition analysis still work.
+
+Similarity is visual and semantic resemblance, not face identification. Sentiment uses filenames and optional recognized text; it does **not** infer anyone’s emotions. Items that have not been analyzed remain visible in **Not analyzed**, and are never presented as visual matches.
 
 ### Auto organization
 
-Choose **Library → ••• → Auto organize**, or select a batch first. Preview generated names using `{date}`, `{type}`, `{sequence}`, and `{original}`; extensions are preserved and name collisions receive a numeric suffix. Dates use UTC for stable results across time zones. Group the batch into collections by month, media type, original name, or cached color.
+Choose **Library → ••• → Auto organize**, or select a batch first. Preview generated names using `{date}`, `{type}`, `{sequence}`, and `{original}`; extensions are preserved and name collisions receive a numeric suffix. Dates use UTC for stable results across time zones. Group the batch into collections by month, media type, original name, cached color, or theme.
 
 The default **In Mosaic** mode changes local display names and collection memberships. The original filename remains available in Details. **Undo** restores the last batch's prior names and memberships, including after a restart; later manual additions are retained. Choose **Original files** to rename/move actual files within their connected folder grant. Grouped files go into `Mosaic/<group>/`; without grouping, renames stay in the original directory. Preview shows the exact destination paths, then a separate Move files action confirms the batch. Photos-library items and individually opened files are excluded from physical moves; connect their parent folder through Settings first.
 
@@ -54,9 +56,16 @@ No background rule silently reorganizes your library. Color uses existing analys
 
 ### Player
 
-Native AVKit playback keeps the system’s accessible transport, HDR rendering, AirPlay, Picture in Picture, embedded audio/subtitle selection, and playback controls where supported by the asset and device.
+Video plays edge to edge under one set of floating glass controls that fade after three seconds of playback and return when paused, when scrubbing, at the end of a video, or while VoiceOver is running. Tap the picture to show or hide them.
 
-Mosaic adds:
+- A large play/pause button between skip back and skip forward, plus a scrubber with buffered range and elapsed/remaining time (tap the time to switch).
+- Double-tap the left or right third to skip; repeated taps accumulate. Press and hold for temporary 2× speed. Pinch to switch between fit and fill.
+- One-tap speed, subtitle and audio-track selection, Picture in Picture, and mute; loop, lock, and the full playback panel live in the ⋯ menu.
+- The viewer pages horizontally like Photos, following your finger and previewing neighbors from cached thumbnails. Swipe down to close, swipe up for details. Zoomed photos never page.
+
+Playback uses AVFoundation with an `AVPlayerLayer`, keeping HDR rendering, AirPlay, and system Picture in Picture where supported by the asset and device.
+
+Mosaic also offers:
 
 - Saved playback position and configurable autoplay.
 - Configurable skip interval, exact time seeking, and frame stepping.
@@ -142,7 +151,7 @@ scripts/         Synthetic media fixtures and reproducible vector icon rendering
 
 Photos thumbnails use `PHCachingImageManager`; file thumbnails use downsampling and a 64 MB cost-bounded cache, with at most three concurrent decodes. Grid work is lazy. Viewer images are bounded to display-oriented resolutions, while videos use native streaming/decoding. Cancellation and identity checks prevent old requests from painting reused cells or replacing newer viewer state. Folder discovery reads metadata on an actor and preserves previous results if a provider is unavailable.
 
-`MosaicCanvasLayout` caches geometry and uses a spatial hash to return only visible tiles. Similarity compares against at most 32 representatives, avoiding an all-pairs quadratic comparison. Analysis is off the UI actor and cached. This is an implementation strategy, **not yet a measured frame-rate guarantee** for large real-world libraries.
+`MosaicCanvasLayout` caches unscaled geometry and uses a spatial hash to return only visible tiles; zoom rescales lazily per query. Similar grouping compares against at most 40 representatives, avoiding an all-pairs quadratic comparison; feature prints are stored as L2-normalized Int8 vectors so similarity is a dot product. Analysis is off the UI actor and cached. This is an implementation strategy, **not yet a measured frame-rate guarantee** for large real-world libraries.
 
 Comments describe ownership, cancellation, scope lifetimes, and algorithm choices. Keep those contracts intact when extending the app. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

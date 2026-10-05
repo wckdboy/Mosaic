@@ -6,8 +6,15 @@ import Photos
 // writes are delegated to actors so browsing can remain responsive.
 @MainActor @Observable
 final class LibraryStore {
-    private(set) var photos: [MediaItem] = []
-    private(set) var archive = LibraryArchive()
+    private(set) var photos: [MediaItem] = [] { didSet { rebuildItems() } }
+    private(set) var archive = LibraryArchive() {
+        didSet {
+            // Favorites, positions, and collections change often and never affect items.
+            if oldValue.files != archive.files || oldValue.displayNames != archive.displayNames {
+                rebuildItems()
+            }
+        }
+    }
     private(set) var authorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     private(set) var isLoading = false
     private(set) var isImporting = false
@@ -26,10 +33,16 @@ final class LibraryStore {
     private let isolated: Bool
     private var changeObserver: PhotoChanges?
     private var saveTask: Task<Void, Never>?
-    var items: [MediaItem] {
+    // Stored rather than computed: views read this on every render, and rebuilding
+    // a large library array per body evaluation is measurable during scrolling.
+    private(set) var items: [MediaItem] = []
+    private func rebuildItems() {
         let source = photos + archive.files
-        guard let names = archive.displayNames, !names.isEmpty else { return source }
-        return source.map { item in
+        guard let names = archive.displayNames, !names.isEmpty else {
+            items = source
+            return
+        }
+        items = source.map { item in
             guard let name = names[item.id] else { return item }
             var presented = item
             presented.originalName = item.name

@@ -77,11 +77,16 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    Toggle("Group Mosaic by appearance", isOn: $visualAnalysis)
+                    Toggle("Analyze photos on this iPhone", isOn: $visualAnalysis)
+                    if visualAnalysis && MosaicIndexer.shared.running {
+                        LabeledContent("Analyzing") {
+                            Text(MosaicIndexer.shared.progress.formatted(.percent.precision(.fractionLength(0))))
+                                .monospacedDigit()
+                        }
+                    }
                     Button("Clear visual analysis cache") {
-                        visualAnalysis = false
                         Task {
-                            await MosaicAnalysis.shared.clear()
+                            await MosaicIndexer.shared.reset()
                             visualCacheVersion += 1
                         }
                     }
@@ -89,7 +94,7 @@ struct SettingsView: View {
                     Text("Mosaic canvas")
                 } footer: {
                     Text(
-                        "Color and similarity use small local Photos thumbnails, analyzed in batches of 500. Similarity compares composition, not identity. Sentiment describes filenames and optional recognized text, not people’s emotions. Files without a cached analysis stay in Not analyzed. Pan in any direction and pinch to zoom."
+                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs in the background and pauses when Mosaic is closed or your iPhone is hot. Tap any tile on the canvas to explore similar media; pinch or double-tap to zoom."
                     )
                 }
                 Section {

@@ -5,6 +5,21 @@ import SwiftUI
 struct ContentView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("visualAnalysis") private var visualAnalysis = true
+    @AppStorage("visualCacheVersion") private var visualCacheVersion = 0
+    // Indexing follows library contents, the setting, and foreground state.
+    private struct IndexTrigger: Equatable {
+        let photos: Int
+        let files: Int
+        let enabled: Bool
+        let cacheVersion: Int
+        let active: Bool
+    }
+    private var indexTrigger: IndexTrigger {
+        IndexTrigger(
+            photos: store.photos.count, files: store.archive.files.count, enabled: visualAnalysis,
+            cacheVersion: visualCacheVersion, active: scenePhase == .active && store.isReady)
+    }
     var body: some View {
         @Bindable var store = store
         TabView {
@@ -27,6 +42,10 @@ struct ContentView: View {
                 .padding().glassEffect(in: .rect(cornerRadius: 20)).padding()
                 .accessibilityElement(children: .contain)
             }
+        }
+        .task(id: indexTrigger) {
+            let trigger = indexTrigger
+            await MosaicIndexer.shared.update(items: store.items, enabled: trigger.enabled && trigger.active)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
