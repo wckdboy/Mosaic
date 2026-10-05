@@ -64,10 +64,15 @@ struct AutoOrganizeView: View {
                 } else {
                     Form {
                         Section {
-                            Picker("Change", selection: $options.moveOriginals) {
-                                Text("In Mosaic").tag(false)
-                                Text("Original files").tag(true)
-                            }.pickerStyle(.segmented)
+                            // Segments truncate at accessibility sizes. A compact menu shows only
+                            // the short current value; VoiceOver still reads it as "Change".
+                            if textSize.isAccessibilitySize {
+                                Picker("Change", selection: $options.moveOriginals) { changeOptions }
+                                    .pickerStyle(.menu).labelsHidden().accessibilityLabel("Change")
+                            } else {
+                                Picker("Change", selection: $options.moveOriginals) { changeOptions }
+                                    .pickerStyle(.segmented)
+                            }
                             Toggle("Rename", isOn: $options.rename)
                             if options.rename {
                                 // Wrap long patterns at accessibility text sizes so
@@ -137,7 +142,7 @@ struct AutoOrganizeView: View {
                                             if change.name != change.item.name {
                                                 Text(change.item.name).font(.caption).foregroundStyle(
                                                     .secondary
-                                                ).lineLimit(1)
+                                                ).fixedSize(horizontal: false, vertical: true)
                                             }
                                             if let collection = change.collection {
                                                 Label(collection, systemImage: "folder").font(.caption)
@@ -178,6 +183,9 @@ struct AutoOrganizeView: View {
                                         : "Organize \(changes.count) items"
                             ).font(.headline).frame(maxWidth: .infinity)
                                 .padding(8)
+                                // A pinned action that grows unbounded hides the form it
+                                // confirms; cap it at a size that stays one or two lines.
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                         }
                         .buttonStyle(.glassProminent).disabled(
                             applying || planning || plannedRequest != request || changes.isEmpty
@@ -237,6 +245,10 @@ struct AutoOrganizeView: View {
                 planning = false
             }
         }
+    }
+    @ViewBuilder private var changeOptions: some View {
+        Text("In Mosaic").tag(false)
+        Text("Original files").tag(true)
     }
     private var patternTokens: some View {
         ForEach(OrganizationPlanner.tokens, id: \.self) { token in

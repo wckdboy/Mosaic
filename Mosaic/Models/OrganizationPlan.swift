@@ -9,6 +9,7 @@ struct OrganizationOptions: Equatable, Sendable {
         case type = "Media type"
         case name = "Name"
         case color = "Color"
+        case theme = "Theme"
     }
     var moveOriginals = false
     var rename = true
@@ -95,6 +96,7 @@ enum OrganizationPlanner {
             case .type: collection = item.kind.title
             case .name: collection = MosaicClusterBuilder.nameGroup(source)
             case .color: collection = descriptors[item.id]?.color ?? "Unsorted"
+            case .theme: collection = descriptors[item.id]?.theme ?? "Unsorted"
             }
             return OrganizationChange(item: item, name: name, collection: collection)
         }

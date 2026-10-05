@@ -1,4 +1,5 @@
 #if DEBUG
+    import AVFoundation
     import SwiftUI
     import UIKit
 
@@ -36,10 +37,69 @@
                             id: "fixture:\(index)", name: name, kind: .photo,
                             date: Date(timeIntervalSince1970: 1_700_000_000 - Double(index)), fileURL: url))
                 }
+                if ProcessInfo.processInfo.arguments.contains("--ui-testing-video") {
+                    let url = root.appending(path: "Clip_001.mov")
+                    if !FileManager.default.fileExists(atPath: url.path) { try writeClip(to: url) }
+                    archive.files.insert(
+                        MediaItem(
+                            id: "fixture:video", name: "Clip_001.mov", kind: .video,
+                            date: Date(timeIntervalSince1970: 1_700_000_100), duration: 6, fileURL: url),
+                        at: 0)
+                }
                 let archiveURL = root.appending(path: "library.json")
                 try JSONEncoder().encode(archive).write(to: archiveURL, options: .atomic)
                 return LibraryStore(repository: ArchiveRepository(url: archiveURL), isolated: true)
             } catch { preconditionFailure("Unable to prepare isolated UI fixtures: \(error)") }
+        }
+
+        // A six-second procedural H.264 clip exercises the real video transport.
+        private static func writeClip(to url: URL) throws {
+            let size = CGSize(width: 320, height: 240)
+            let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+            let input = AVAssetWriterInput(
+                mediaType: .video,
+                outputSettings: [
+                    AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: size.width,
+                    AVVideoHeightKey: size.height,
+                ])
+            let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: input,
+                sourcePixelBufferAttributes: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                    kCVPixelBufferWidthKey as String: size.width, kCVPixelBufferHeightKey as String: size.height,
+                ])
+            writer.add(input)
+            writer.startWriting()
+            writer.startSession(atSourceTime: .zero)
+            for frame in 0..<180 {
+                while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.002) }
+                guard let pool = adaptor.pixelBufferPool else { break }
+                var buffer: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+                guard let buffer else { break }
+                CVPixelBufferLockBaseAddress(buffer, [])
+                if let context = CGContext(
+                    data: CVPixelBufferGetBaseAddress(buffer), width: Int(size.width), height: Int(size.height),
+                    bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                        | CGBitmapInfo.byteOrder32Little.rawValue)
+                {
+                    let hue = CGFloat(frame) / 180
+                    context.setFillColor(
+                        UIColor(hue: hue, saturation: 0.5, brightness: 0.6, alpha: 1).cgColor)
+                    context.fill(CGRect(origin: .zero, size: size))
+                    context.setFillColor(UIColor.white.cgColor)
+                    context.fillEllipse(in: CGRect(x: CGFloat(frame % 60) * 4, y: 80, width: 80, height: 80))
+                }
+                CVPixelBufferUnlockBaseAddress(buffer, [])
+                adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+            }
+            input.markAsFinished()
+            let done = DispatchSemaphore(value: 0)
+            writer.finishWriting { done.signal() }
+            done.wait()
+            if writer.status != .completed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         }
     }
 #endif

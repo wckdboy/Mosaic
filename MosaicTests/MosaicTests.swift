@@ -237,7 +237,10 @@ struct MosaicGroupingTests {
         let visible =
             layout.layoutAttributesForElements(in: CGRect(x: 0, y: 0, width: 400, height: 800)) ?? []
         #expect(visible.count < 50)
-        #expect(layout.collectionViewContentSize.height > 100000)
+        // The world is two-dimensional: roughly square rather than one tall column.
+        let size = layout.collectionViewContentSize
+        #expect(size.width > 8000 && size.height > 8000)
+        #expect(max(size.width, size.height) / min(size.width, size.height) < 1.6)
     }
 }
 

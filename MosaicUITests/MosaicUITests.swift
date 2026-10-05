@@ -10,14 +10,17 @@ import XCTest
         // landscape into later tests. Set this before each app launch.
         XCUIDevice.shared.orientation = .portrait
     }
-    private func launch(appearance: String = "light", direction: String = "vertical", largeText: Bool = false)
-    {
+    private func launch(
+        appearance: String = "light", direction: String = "vertical", largeText: Bool = false,
+        video: Bool = false
+    ) {
         app = XCUIApplication()
         app.launchArguments = [
             "--ui-testing", "-appearance", appearance, "-galleryDirection", direction,
             "-mosaicGrouping", "Name", "-visualAnalysis", "NO", "-gridColumns",
-            "3",
+            "3", "-resumePlayback", "NO",
         ]
+        if video { app.launchArguments.append("--ui-testing-video") }
         if largeText {
             app.launchArguments += [
                 "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
@@ -41,7 +44,7 @@ import XCTest
         XCTAssertTrue(app.staticTexts["viewer.filename"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
         app.buttons["Find similar"].tap()
-        XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["mosaic.focus"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
         app.buttons["Close"].tap()
@@ -58,6 +61,25 @@ import XCTest
         app.buttons["Clear search"].tap()
         app.buttons["Gallery view"].tap()
         XCTAssertTrue(app.buttons["media-fixture:0"].waitForExistence(timeout: 5))
+    }
+    func testCanvasTapExploresAndBackReturnsToOverview() throws {
+        launch()
+        app.buttons["Mosaic view"].tap()
+        XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
+        let canvas = app.collectionViews["mosaic.canvas"]
+        // The canvas is two-dimensional: both axes pan.
+        canvas.swipeLeft()
+        canvas.swipeUp()
+        XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
+        app.cells.firstMatch.tap()
+        XCTAssertTrue(app.buttons["mosaic.focus"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Match by Similar"].exists)
+        XCTAssertGreaterThan(app.cells.count, 1)
+        capture("Focused discovery")
+        app.buttons["Match by Name"].tap()
+        XCTAssertTrue(app.buttons["Match by Name"].isSelected)
+        app.buttons["Back to Mosaic"].tap()
+        XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
     }
     func testOrganizationPreviewApplyUndoAndPhysicalExclusion() throws {
         launch()
@@ -84,26 +106,59 @@ import XCTest
         for iteration in 0..<6 {
             app.buttons["media-fixture:0"].tap()
             XCTAssertTrue(app.buttons["Find similar"].waitForExistence(timeout: 5))
-            if iteration.isMultiple(of: 2) {
-                app.swipeLeft()
-            } else {
-                app.buttons["Next"].tap()
-            }
+            app.swipeLeft()
             XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_002.jpg")
-            app.buttons["Close"].tap()
+            // Alternate the two ways out: the Close button and the swipe-down gesture.
+            if iteration.isMultiple(of: 2) {
+                app.buttons["Close"].tap()
+            } else {
+                app.swipeDown()
+            }
+            XCTAssertTrue(app.buttons["library.options"].waitForExistence(timeout: 5))
         }
         XCTAssertTrue(app.buttons["library.options"].isHittable)
     }
-    func testVerticalSwipePagesInBothDirections() {
+    // The viewer pages horizontally like Photos; up opens details, down closes.
+    func testViewerSwipesPageShowDetailsAndDismiss() {
         launch()
         app.buttons["media-fixture:0"].tap()
         XCTAssertTrue(app.buttons["Find similar"].waitForExistence(timeout: 5))
-        app.swipeUp()
+        app.swipeLeft()
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_002.jpg")
-        app.swipeDown()
+        app.swipeRight()
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
+        app.swipeUp()
+        XCTAssertTrue(app.navigationBars["Details"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
+        app.swipeDown()
+        XCTAssertTrue(app.buttons["library.options"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["viewer.filename"].exists)
+    }
+    func testVideoTransportControlsAndChromeToggle() throws {
+        launch(video: true)
+        app.buttons["media-fixture:video"].tap()
+        let playPause = app.buttons["viewer.playPause"]
+        XCTAssertTrue(playPause.waitForExistence(timeout: 10))
+        // Autoplay starts the clip; pausing keeps the floating controls on screen.
+        if playPause.label == "Pause" { playPause.tap() }
+        XCTAssertEqual(playPause.label, "Play")
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.scrubber"].exists)
+        app.buttons["Mute"].tap()
+        XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["Back 10 seconds"].isHittable)
+        XCTAssertTrue(app.buttons["Forward 10 seconds"].isHittable)
+        capture("Video controls")
+        try app.performAccessibilityAudit(for: [.hitRegion, .sufficientElementDescription, .trait])
+        // A tap on the picture hides all chrome; a second tap restores it.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        XCTAssertTrue(app.buttons["Close"].waitForNonExistence(timeout: 3))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 3))
+        playPause.tap()
+        XCTAssertEqual(app.buttons["viewer.playPause"].label, "Pause")
         app.buttons["Close"].tap()
-        XCTAssertTrue(app.buttons["library.options"].isHittable)
+        XCTAssertTrue(app.buttons["library.options"].waitForExistence(timeout: 5))
     }
     func testAccessibilityLightGalleryAndViewer() throws {
         launch()
@@ -131,7 +186,10 @@ import XCTest
         app.buttons["Zoom out"].tap()
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
         capture("Landscape XXXL canvas")
+        // A tile explores its neighborhood first; the reference opens full screen.
         app.cells.firstMatch.tap()
+        XCTAssertTrue(app.buttons["mosaic.focus"].waitForExistence(timeout: 5))
+        app.buttons["mosaic.focus"].tap()
         XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Close"].isHittable)
         capture("Landscape XXXL viewer")
@@ -155,7 +213,8 @@ import XCTest
             // XXXL. Verified against a screenshot and hierarchy (234×63pt label
             // inside a 400×93pt button). Keep this exception specific: the label
             // must remain hittable and completely above the pinned action area.
-            guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 27,
+            // Also observed on iOS 26.1 with the label fully above the action bar.
+            guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26,
                 issue.auditType == .textClipped, let element = issue.element,
                 element.label == "Insert field"
             else { return false }

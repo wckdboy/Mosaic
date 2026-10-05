@@ -56,11 +56,14 @@ struct MediaBrowser: View {
     @State private var similar: MediaItem?
     @State private var importing = false
     @State private var visibleItems: [MediaItem] = []
+    @State private var groups: [DayGroup] = []
 
     private var filterKey: FilterKey {
         FilterKey(
             items: items, query: query, kind: kind, sort: sort,
-            text: textRecognition ? store.recognizedText : [:])
+            text: textRecognition ? store.recognizedText : [:],
+            // Visual labels only matter for a query; avoid refiltering while indexing otherwise.
+            index: query.isEmpty ? 0 : MosaicIndexer.shared.revision)
     }
     private struct FilterKey: Equatable {
         let items: [MediaItem]
@@ -68,16 +71,24 @@ struct MediaBrowser: View {
         let kind: MediaItem.Kind?
         let sort: MediaSort
         let text: [String: String]
+        let index: Int
     }
-    private var groups: [(date: Date, items: [MediaItem])] {
-        if sort == .name { return [(Date.distantPast, visibleItems)] }
-        var result: [(date: Date, items: [MediaItem])] = []
-        for item in visibleItems {
-            let day = Calendar.current.startOfDay(for: item.date)
+    struct DayGroup: Identifiable, Sendable {
+        let date: Date
+        var items: [MediaItem]
+        var id: Date { date }
+    }
+    // Day sections are computed with the filter, off the main actor, not per render.
+    nonisolated static func dayGroups(_ items: [MediaItem], sort: MediaSort) -> [DayGroup] {
+        if sort == .name { return [DayGroup(date: .distantPast, items: items)] }
+        let calendar = Calendar.current
+        var result: [DayGroup] = []
+        for item in items {
+            let day = calendar.startOfDay(for: item.date)
             if result.last?.date == day {
                 result[result.count - 1].items.append(item)
             } else {
-                result.append((day, [item]))
+                result.append(DayGroup(date: day, items: [item]))
             }
         }
         return result
@@ -93,7 +104,7 @@ struct MediaBrowser: View {
             await store.refreshPhotos()
             await store.refreshFolders()
         }
-        .searchable(text: $query, prompt: "Filename, format, or year")
+        .searchable(text: $query, prompt: "Search: beach, dog, blue, 2024…")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if showsOverview && !selecting {
@@ -153,16 +164,20 @@ struct MediaBrowser: View {
         }
         .task(id: filterKey) {
             let current = filterKey
+            let visual = current.query.isEmpty ? [:] : MosaicIndexer.shared.descriptors
+            if !current.query.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            }
             let result = await Task.detached(priority: .userInitiated) {
-                current.sort.sorted(
-                    current.items.filter { item in
-                        (current.kind == nil || item.kind == current.kind)
-                            && (current.query.isEmpty
-                                || "\(item.name) \(item.kind.title) \(Calendar.current.component(.year, from: item.date)) \(current.text[item.id] ?? "")"
-                                    .localizedStandardContains(current.query))
-                    })
+                let filter = MosaicFilter(query: current.query, kind: current.kind)
+                let sorted = current.sort.sorted(
+                    current.items.filter { filter.matches($0, favorites: [], text: current.text, visual: visual) })
+                return (sorted, Self.dayGroups(sorted, sort: current.sort))
             }.value
-            if !Task.isCancelled { visibleItems = result }
+            if !Task.isCancelled {
+                visibleItems = result.0
+                groups = result.1
+            }
         }
         .fullScreenCover(item: $viewer) { route in
             MediaViewer(items: route.items, initialID: route.selectedID)
@@ -197,7 +212,7 @@ struct MediaBrowser: View {
                                 ? "Open media from Files or connect your photo library."
                                 : "Try a filename, a year, or a format like GIF."))
                 } else {
-                    ForEach(groups, id: \.date) { group in
+                    ForEach(groups) { group in
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Text(
@@ -299,8 +314,11 @@ struct MediaBrowser: View {
                                         }
                                     }
                             }
-                        }.padding(.horizontal, 3).scrollTargetLayout()
-                    }.scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByFew))
+                        }.padding(.horizontal, 3)
+                    }
+                    // Free momentum scrolling: view-aligned snapping stopped every
+                    // fling after a few tiles, which made long libraries tedious.
+                    .scrollIndicators(.hidden)
                 }
             }.padding(.top, 12)
         }
@@ -316,7 +334,7 @@ struct MediaBrowser: View {
                 }
                 Spacer()
                 Image(systemName: "square.grid.3x3.square").font(.system(size: 27, weight: .ultraLight))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondary).accessibilityHidden(true)
             }
             if store.authorization == .limited {
                 HStack {

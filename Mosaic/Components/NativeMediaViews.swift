@@ -3,8 +3,8 @@ import ImageIO
 import PhotosUI
 import SwiftUI
 
-// AVKit owns transport, subtitle/audio selection, HDR, AirPlay, speed, and PiP.
-// Retaining native controls also preserves VoiceOver and system playback gestures.
+// AVKit's stock controller remains for simple single-item surfaces such as S3
+// streaming. The library viewer uses VideoPlayerSurface with Mosaic's own controls.
 struct NativeVideoPlayer: UIViewControllerRepresentable {
     let player: AVPlayer
     var fill = false
@@ -32,9 +32,11 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
     @Binding var isZoomed: Bool
-    init(image: UIImage, isZoomed: Binding<Bool> = .constant(false)) {
+    var onTap: (() -> Void)?
+    init(image: UIImage, isZoomed: Binding<Bool> = .constant(false), onTap: (() -> Void)? = nil) {
         self.image = image
         _isZoomed = isZoomed
+        self.onTap = onTap
     }
     func makeCoordinator() -> Coordinator { Coordinator(isZoomed: $isZoomed) }
     func makeUIView(context: Context) -> UIScrollView {
@@ -61,10 +63,16 @@ struct ZoomableImage: UIViewRepresentable {
             target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         tap.numberOfTapsRequired = 2
         scroll.addGestureRecognizer(tap)
+        // A single tap toggles viewer chrome only once a double-tap zoom is ruled out.
+        let single = UITapGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.singleTap(_:)))
+        single.require(toFail: tap)
+        scroll.addGestureRecognizer(single)
         scroll.accessibilityLabel = "Photo. Pinch or double-tap to zoom."
         return scroll
     }
     func updateUIView(_ scroll: UIScrollView, context: Context) {
+        context.coordinator.onTap = onTap
         if context.coordinator.imageView.image !== image {
             context.coordinator.imageView.image = image
             scroll.setZoomScale(1, animated: false)
@@ -73,9 +81,12 @@ struct ZoomableImage: UIViewRepresentable {
     final class Coordinator: NSObject, UIScrollViewDelegate {
         let imageView = UIImageView()
         let isZoomed: Binding<Bool>
+        var onTap: (() -> Void)?
         init(isZoomed: Binding<Bool>) { self.isZoomed = isZoomed }
+        @objc func singleTap(_ recognizer: UITapGestureRecognizer) { onTap?() }
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            isZoomed.wrappedValue = scrollView.zoomScale > 1.01
+            let zoomed = scrollView.zoomScale > 1.01
+            if isZoomed.wrappedValue != zoomed { isZoomed.wrappedValue = zoomed }
         }
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
         @objc func doubleTap(_ recognizer: UITapGestureRecognizer) {
@@ -84,7 +95,7 @@ struct ZoomableImage: UIViewRepresentable {
                 scroll.setZoomScale(1, animated: true)
             } else {
                 let point = recognizer.location(in: imageView)
-                let size = CGSize(width: scroll.bounds.width / 3, height: scroll.bounds.height / 3)
+                let size = CGSize(width: scroll.bounds.width / 2.5, height: scroll.bounds.height / 2.5)
                 scroll.zoom(
                     to: CGRect(
                         x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width,

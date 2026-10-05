@@ -108,20 +108,44 @@ private final class VideoThumbnailRequest: @unchecked Sendable {
             completion(nil)
             return
         }
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .opportunistic
-        options.resizeMode = .fast
-        // Browsing must not download an entire iCloud library. The viewer requests originals.
-        options.isNetworkAccessAllowed = false
         request = Self.manager.requestImage(
             for: asset, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
-            options: options
+            options: Self.options
         ) { [weak self] image, _ in
             Task { @MainActor in
                 guard self?.generation == token else { return }
                 completion(image)
             }
         }
+    }
+    // Prefetching must use the same size, mode, and options as load() to hit the cache.
+    static var options: PHImageRequestOptions {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        // Browsing must not download an entire iCloud library. The viewer requests originals.
+        options.isNetworkAccessAllowed = false
+        return options
+    }
+    private static func assets(_ items: [MediaItem]) -> [PHAsset] {
+        let ids = items.filter(\.isPhotoLibrary).map(\.photoIdentifier)
+        guard !ids.isEmpty else { return [] }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        return result.objects(at: IndexSet(integersIn: 0..<result.count))
+    }
+    static func prefetch(_ items: [MediaItem], pixels: Int) {
+        let assets = assets(items)
+        guard !assets.isEmpty else { return }
+        manager.startCachingImages(
+            for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
+            options: options)
+    }
+    static func cancelPrefetch(_ items: [MediaItem], pixels: Int) {
+        let assets = assets(items)
+        guard !assets.isEmpty else { return }
+        manager.stopCachingImages(
+            for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
+            options: options)
     }
     func cancel() {
         generation = UUID()
