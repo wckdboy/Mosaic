@@ -11,12 +11,11 @@ struct LibraryView: View {
                 description: Text("Import media to organize it, entirely on-device.")
             )
             .navigationTitle("Library")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Import", systemImage: "square.and.arrow.down") {}
-                        .buttonStyle(.accentGlass)
-                        .labelStyle(.iconOnly)
-                }
+            .overlay(alignment: .bottomTrailing) {
+                Button("Import", systemImage: "square.and.arrow.down") {}
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.accentGlass)
+                    .padding(24)
             }
         }
     }

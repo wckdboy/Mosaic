@@ -49,17 +49,17 @@ extension Color {
 }
 
 // The single accent treatment BRANDING.md section 4 describes for a screen's one
-// primary action: a gradient fill behind clear Liquid Glass. Use sparingly —
-// at most one per screen.
+// primary action: a gradient fill behind clear Liquid Glass. This is a floating
+// action button, not a toolbar style — toolbar items should stay plain glass,
+// which the system already provides automatically.
 struct AccentGlassButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(.title2.weight(.semibold))
             .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(BrandPalette.accentGradient, in: Capsule())
-            .glassEffect(.clear.interactive(), in: Capsule())
+            .frame(width: 56, height: 56)
+            .background(BrandPalette.accentGradient, in: Circle())
+            .glassEffect(.clear.interactive(), in: Circle())
             .opacity(configuration.isPressed ? 0.85 : 1)
     }
 }

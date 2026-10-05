@@ -11,12 +11,11 @@ struct FilesView: View {
                 description: Text("Files you open will stay in place on your device.")
             )
             .navigationTitle("Files")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("New Folder", systemImage: "folder.badge.plus") {}
-                        .buttonStyle(.accentGlass)
-                        .labelStyle(.iconOnly)
-                }
+            .overlay(alignment: .bottomTrailing) {
+                Button("New Folder", systemImage: "folder.badge.plus") {}
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.accentGlass)
+                    .padding(24)
             }
         }
     }
