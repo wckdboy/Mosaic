@@ -18,3 +18,25 @@ Run Product > Test in Xcode before sharing a change. File and media handling sho
 ## Changes that need extra care
 
 File access, media indexing, and anything touching on-device ML models can affect user data or performance. Keep these changes focused and document the verification performed in the pull request description.
+
+## Formatting
+
+The repository includes `.swift-format` with four-space indentation. Run:
+
+```sh
+xcrun swift-format format --configuration .swift-format --in-place --recursive Mosaic MosaicTests
+```
+
+Explain ownership, cancellation, persistence, and performance tradeoffs in comments. Avoid comments that simply repeat a statement. Keep explanatory product copy in Settings rather than expanding the browsing interface.
+
+## Boundaries worth preserving
+
+- Never delete or move originals as a side effect of organizing references. Physical changes belong only to the explicit Original files workflow, with exact-path preview, confirmation, collision refusal, journal-before-move ordering, and recoverable Undo.
+- Keep file-provider security scopes alive for the entire read/playback lifetime.
+- Perform media decoding, folder enumeration, and analysis off the main actor.
+- Bound caches and analysis batches. Do not replace canvas viewport lookup with an all-items scan per frame.
+- Keep credentials in Keychain and signed URLs ephemeral. Tests must not need real cloud secrets.
+- Label interactive media cells explicitly; their images are decorative.
+- Respect Reduce Motion and preserve pan gestures while a photo is zoomed.
+
+The shared Mosaic scheme includes MosaicTests. Xcode MCP tools can build, run tests, and verify simulator interactions. A simulator pass does not substitute for hardware HDR/AirPlay/PiP or real file-provider testing.

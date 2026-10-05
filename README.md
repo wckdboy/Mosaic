@@ -1,37 +1,181 @@
+<div align="center">
+
 # Mosaic
 
-Mosaic is a local-first file manager, photo library, and video player for iPhone. Everything — browsing, organizing, and playback — happens on-device: no account, no cloud sync, no analytics.
+**A quieter home for your photos, GIFs, and films.**
 
-- **Local.** Files and media stay where they already are; Mosaic doesn't maintain a private copy.
-- **Private.** No account, no tracking, no third-party SDKs.
-- **Smart organizing.** On-device machine learning (Apple's [Foundation Models](https://developer.apple.com/documentation/foundationmodels) and related frameworks) surfaces structure in a library without sending content anywhere.
-- **Built for viewing.** Photo and video playback is the focus, tuned for iOS 26/27 and the Liquid Glass design system.
+Native iPhone and iPad media browsing, organization, and playback.<br>
+Local first. Open source. No Mosaic account.
 
-This is an early-stage project — see [open issues](https://github.com/wckdboy/Mosaic/issues) for current direction.
+<img src="docs/mosaic-icon.svg" width="96" alt="Mosaic five-tile icon">
 
-## Requirements
+[Getting started](#getting-started) · [What works](#what-works) · [Cloud storage](#cloud-storage) · [Development](#development) · [Privacy](PRIVACY.md)
 
-- Xcode 27 or later
-- iOS 26 or later
+</div>
 
-## Local development
+<p align="center">
+  <img src="docs/screenshots/mosaic.png" width="260" alt="Mosaic canvas with quiet search and two navigation destinations">
+  <img src="docs/screenshots/similar.png" width="260" alt="Related photos found from a video reference">
+</p>
 
-1. Open `Mosaic.xcodeproj` in Xcode.
-2. Select the `Mosaic` scheme and an iPhone simulator or device.
-3. Build and run.
+Screenshots use simulator sample media. No sample media ships with the app.
 
-## Branding
+## What works
 
-See `BRANDING.md` for the shared Omnie visual identity (monochrome UI, single accent gradient, Liquid Glass usage) that Mosaic follows.
+### Library
 
-## Contributing
+- Photos access with full or limited permission, plus media opened through Files.
+- Recursive discovery in folders you explicitly connect—including nested Downloads folders.
+- Horizontal or vertical gallery browsing, adjustable density, date grouping, filename/format/year search, and sorting.
+- Favorites, named collections, multi-selection, and quick organization actions.
+- Full-screen viewing with pinch/double-tap zoom, directional paging, GIF/APNG playback, Live Photos, metadata, and sharing.
 
-See `CONTRIBUTING.md`.
+### Mosaic canvas
 
-## Privacy
+Choose the **Mosaic button in Library**. Library and Collections are the two main destinations; Files and cloud sources live in Settings → Connections.
 
-See `PRIVACY.md`.
+A free-panning, zoomable canvas groups media by **color**, **name**, **visual similarity**, or **text sentiment**. Large and small tiles form a stable mosaic within each group. Search filenames or recognized text, then narrow by media type, favorites, or source from one compact filter menu.
 
-## License
+Tap **Find similar** in any library media viewer, or long-press a gallery tile, to explore related photos, videos, animations, and Live Photos around that reference. A thumbnail breadcrumb keeps the starting point visible. Choose composition, color, name, or text sentiment; closing discovery returns to the same item. Similarity excludes the reference and returns up to 200 ranked results across media types, with a clearly labeled name fallback when the reference cannot be analyzed.
 
-Mosaic is available under the MIT License. See `LICENSE`.
+The canvas recycles cells in both axes. A spatial index finds visible frames; it does not inspect every item on each pan. Color and composition analysis uses small local Photos thumbnails or already cached Files thumbnails, in cancellable batches of up to 500. Compact descriptors are cached on disk. Originals are not decoded just to arrange the canvas. An explicit Find similar action may load the reference’s authorized Files thumbnail.
+
+Similarity uses a perceptual composition hash, not face identification or semantic object recognition. Sentiment uses filenames and optional recognized text; it does **not** infer anyone’s emotions. Items that cannot be analyzed remain visible in **Not analyzed**. More batches can be requested from the canvas toolbar.
+
+### Auto organization
+
+Choose **Library → ••• → Auto organize**, or select a batch first. Preview generated names using `{date}`, `{type}`, `{sequence}`, and `{original}`; extensions are preserved and name collisions receive a numeric suffix. Dates use UTC for stable results across time zones. Group the batch into collections by month, media type, original name, or cached color.
+
+The default **In Mosaic** mode changes local display names and collection memberships. The original filename remains available in Details. **Undo** restores the last batch's prior names and memberships, including after a restart; later manual additions are retained. Choose **Original files** to rename/move actual files within their connected folder grant. Grouped files go into `Mosaic/<group>/`; without grouping, renames stay in the original directory. Preview shows the exact destination paths, then a separate Move files action confirms the batch. Photos-library items and individually opened files are excluded from physical moves; connect their parent folder through Settings first.
+
+Moves use Apple file coordination, reject symlink escapes, and never overwrite a destination. Favorites, collection memberships, playback positions, and text indexes follow the new reference. Each move has a durable intent journal, startup recovery, per-file failure reporting, and a persisted Undo list. Undo also refuses collisions or changed source files. Cloud providers can reject moves or require connectivity; test with your provider before a large batch. Empty directories created by a move remain after Undo.
+
+No background rule silently reorganizes your library. Color uses existing analysis, with unavailable descriptors placed in Unsorted.
+
+### Player
+
+Native AVKit playback keeps the system’s accessible transport, HDR rendering, AirPlay, Picture in Picture, embedded audio/subtitle selection, and playback controls where supported by the asset and device.
+
+Mosaic adds:
+
+- Saved playback position and configurable autoplay.
+- Configurable skip interval, exact time seeking, and frame stepping.
+- Speed selection from 0.25× to 3×, fit/fill, video repeat, and A–B repeat.
+- A sleep timer and control lock.
+- External UTF-8 SRT/WebVTT subtitles with timing adjustment.
+- An advanced playback panel that keeps the main viewing surface compact.
+
+**Codec support is native Apple support, not VLC’s full decoder catalog.** MP4/MOV/M4V containers with supported tracks play natively. Other containers can be discovered and opened, but MKV, AVI, WebM, legacy codecs, or particular track combinations may require another app. Unsupported local media offers an action to share/open the original. An integrated alternate decoder is future work; Mosaic does not bundle VLCKit today.
+
+Images use iOS/ImageIO support for JPEG, HEIC, PNG, TIFF, BMP, WebP, and supported RAW formats. GIF/APNG animate; Live Photos use PhotoKit. RAW/camera and HDR compatibility vary by device and OS. Animated WebP is currently displayed as a still image.
+
+### Settings
+
+Customization, connections, permissions, AI, playback preferences, and technical explanations live in **Settings**, keeping the browsing screens focused on media.
+
+- System/light/dark appearance and true monochrome.
+- Gallery direction and density.
+- Folder discovery and cloud connections.
+- Playback and skip preferences.
+- Opt-in, on-device text recognition using Apple Vision. Index local photos in foreground batches; recognized text becomes searchable. No model-provider API or key is needed.
+
+## Getting started
+
+1. Open `Mosaic.xcodeproj` with **Xcode 27 or later**.
+2. Select the shared **Mosaic** scheme and an iPhone or iPad simulator.
+3. Build and run. The app targets **iOS/iPadOS 26+**.
+4. On a physical device, choose your own signing team and a unique bundle identifier.
+5. Connect Photos, open individual files, or use **Settings → Connections → Folders & discovery** to select a folder.
+
+There are no external package dependencies or backend services to configure.
+
+### Discovery on iOS
+
+Mosaic can discover everything in the Photos library you authorize, and recursively scan the folder trees you select. It rescans connected folders on launch, return to the foreground, pull-to-refresh, or a manual scan.
+
+**iOS does not allow a third-party app to search the entire phone.** Other apps’ private containers, unselected folders, and unavailable provider locations cannot be scanned. Select Downloads or a broader accessible parent folder once to include its nested folders. Some Files providers restrict directory access or require connectivity.
+
+Originals stay in their current locations unless you explicitly choose Original files in Auto organize and confirm the preview. Removing a collection, forgetting a file, or disconnecting a folder does not delete original media.
+
+## Cloud storage
+
+### Nextcloud, Proton Drive, Google Drive, and iCloud Drive
+
+Use **Settings → Connections → Cloud storage**. Install and sign in to the provider’s iOS app, then enable its location in **Files → Browse → ••• → Edit**. Select files through the system picker; connect a folder where the provider supports folder grants.
+
+The provider owns authentication, encryption, and downloads. Mosaic only receives access to the files/folders selected by the user. Provider integration is not direct account-wide OAuth access.
+
+Proton Drive’s Files integration depends on the installed version. If its location is unavailable, export the desired media to Files from Proton Drive first, then open or connect that location. Mosaic does not bypass Proton’s encryption or ask for its account password.
+
+### S3 and compatible endpoints
+
+Add a connection with an HTTPS endpoint, bucket, region, and read credentials. Both path-style and virtual-hosted addressing are supported, as are optional temporary session tokens.
+
+- Credentials are stored in this device’s Keychain, not in source files or UserDefaults.
+- The browser uses paginated `ListObjectsV2` requests and folder prefixes.
+- Object access uses Signature V4 URLs generated when needed; signed URLs are not persisted.
+- Videos stream through the native player. Images up to 100 MB are temporarily downloaded for viewing and removed on dismissal.
+- Connections are read-only. Required S3 permissions are `s3:ListBucket` and `s3:GetObject` for the chosen bucket/objects.
+- Disconnecting removes saved credentials; it changes nothing on the server.
+
+Use the bucket’s correct regional endpoint. Expired session credentials require reconnecting. S3 browsing is currently separate from local collections and Mosaic analysis; it does not automatically crawl or download a bucket. Server compatibility and real credentials require integration testing against your provider.
+
+## Development
+
+```text
+Mosaic/
+  Models/        Stable references, archives, grouping, subtitle parsing
+  Services/      PhotoKit, persistence, file access, discovery, playback, S3, analysis
+  Components/    Reusable thumbnails, native media surfaces, recycled canvas
+  Features/      Library, Mosaic, collections, batch organization, viewer, settings
+  Theme/         Neutral surfaces and restrained glass controls
+MosaicTests/     Persistence, format classification, S3 signing, discovery,
+                 subtitle parsing, grouping, viewport bounds, rename/move/Undo recovery
+scripts/         Synthetic media fixtures and reproducible vector icon rendering
+```
+
+### Architecture and performance
+
+`LibraryStore` is the main-actor source of truth. Photos identifiers and security-scoped bookmarks refer to originals. `ArchiveRepository` serializes atomic metadata writes on an actor. A corrupt archive is preserved rather than silently replaced.
+
+Photos thumbnails use `PHCachingImageManager`; file thumbnails use downsampling and a 64 MB cost-bounded cache. Grid work is lazy. Viewer images are bounded to display-oriented resolutions, while videos use native streaming/decoding. Cancellation and identity checks prevent old requests from painting reused cells. Folder discovery reads metadata on an actor and preserves previous results if a provider is unavailable.
+
+`MosaicCanvasLayout` caches geometry and uses a spatial hash to return only visible tiles. Similarity compares against at most 32 representatives, avoiding an all-pairs quadratic comparison. Analysis is off the UI actor and cached. This is an implementation strategy, **not yet a measured frame-rate guarantee** for large real-world libraries.
+
+Comments describe ownership, cancellation, scope lifetimes, and algorithm choices. Keep those contracts intact when extending the app. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Tests
+
+Use **Product → Test** in Xcode, or:
+
+```sh
+xcodebuild test \
+  -project Mosaic.xcodeproj \
+  -scheme Mosaic \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro Max'
+```
+
+Choose an installed simulator name if yours differs. Tests use temporary files and AWS’s public signing example; they do not contact a cloud service or require credentials.
+
+Create synthetic visual fixtures with Pillow and FFmpeg:
+
+```sh
+python3 scripts/make-test-media.py /tmp/mosaic-media
+ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 \
+  -f lavfi -i sine=frequency=440:sample_rate=44100 \
+  -t 12 -c:v libx264 -pix_fmt yuv420p -c:a aac /tmp/mosaic-media/test-video.mp4
+xcrun simctl addmedia booted /tmp/mosaic-media/*.jpg \
+  /tmp/mosaic-media/motion.gif /tmp/mosaic-media/test-video.mp4
+```
+
+### Verification and remaining work
+
+The current Xcode MCP test run passes **55 tests**. Development uses Xcode’s MCP build, test, and simulator-interaction tools. Automated tests cover the published [AWS Signature V4 vector](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html), atomic archive round trips and corruption, nested discovery, bookmark traversal rejection, collision-safe file moves, symlink confinement, move-journal recovery, persistent batch Undo, subtitle boundaries, and a 10,000-item canvas visibility case.
+
+Before a public release, test on physical iPhones/iPads with large libraries, cloud-only assets, disconnected providers, HDR/RAW samples, Bluetooth/AirPlay, Picture in Picture, VoiceOver, larger text sizes, memory pressure, and long-running playback. Real S3 and third-party provider account flows require credentialed device testing. External SRT/WebVTT captions currently render in Mosaic’s viewer, not inside system Picture in Picture. ASS/SSA, external audio, equalization, Chromecast, and a full alternate video decoder are not implemented.
+
+## Privacy and license
+
+No advertising, analytics, Mosaic account, or Mosaic-hosted upload service. See [PRIVACY.md](PRIVACY.md) for local storage, cloud downloads, and sharing details.
+
+Mosaic is released under the [MIT License](LICENSE). Apple frameworks remain subject to their platform terms. Mosaic is not affiliated with VLC or VideoLAN.

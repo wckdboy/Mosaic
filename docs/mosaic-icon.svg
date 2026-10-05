@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<title>Mosaic — five tiles</title>
+<rect width="1024" height="1024" fill="white"/>
+<rect x="212" y="212" width="380" height="380" rx="54" fill="black"/>
+<rect x="624" y="212" width="188" height="180" rx="38" fill="black"/>
+<rect x="624" y="424" width="188" height="168" rx="38" fill="black"/>
+<rect x="212" y="624" width="180" height="188" rx="38" fill="black"/>
+<rect x="424" y="624" width="388" height="188" rx="42" fill="black"/>
+</svg>

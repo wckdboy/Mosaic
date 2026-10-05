@@ -1,69 +1,105 @@
+import Photos
 import SwiftUI
+import UniformTypeIdentifiers
 
-// Color tokens from BRANDING.md. Mirrors the structure of Omnie's other
-// apps (see omnie-edit/OmnieEdit/Theme/Palette.swift) so Mosaic's UI stays
-// traceable back to the shared brand guide.
-enum BrandPalette {
-
-    // Warm neutrals: the default theme people see in System/Light/Dark mode.
-    enum Neutral {
-        static let background = Color(light: Color(hex: 0xF6F6F4), dark: Color(hex: 0x101010))
-        static let text = Color(light: Color(hex: 0x161616), dark: Color(hex: 0xE6E6E3))
-        static let secondary = Color(light: Color(hex: 0x6E6E6A), dark: Color(hex: 0x8E8E8A))
-        static let hairline = Color(light: Color(hex: 0xD8D8D4), dark: Color(hex: 0x2A2A2A))
-    }
-
-    // True monochrome: the alternate, pure black/white theme from BRANDING.md section 2.1.
-    enum Monochrome {
-        static let background = Color(light: .white, dark: .black)
-        static let text = Color(light: .black, dark: .white)
-        static let secondary = Color(light: Color(hex: 0x6A6A6A), dark: Color(hex: 0x9A9A9A))
-        static let hairline = Color(light: Color(hex: 0xE0E0E0), dark: Color(hex: 0x2A2A2A))
-    }
-
-    // The one accent: purple into orange, diagonal. BRANDING.md section 2.2 reserves
-    // this for exactly one primary action or active/selected state per screen.
-    static let accentGradient = LinearGradient(
-        colors: [Color(hex: 0x9E2EDB), Color(hex: 0xFA9429)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+// Content stays neutral. The gradient belongs only to the primary connection action.
+enum MosaicTheme {
+    static let accent = LinearGradient(
+        colors: [Color(hex: 0x9E2EDB), Color(hex: 0xFA9429)], startPoint: .topLeading,
+        endPoint: .bottomTrailing)
+    static let warmBackground = Color(
+        uiColor: UIColor {
+            $0.userInterfaceStyle == .dark
+                ? UIColor(red: 0.063, green: 0.063, blue: 0.063, alpha: 1)
+                : UIColor(red: 0.965, green: 0.965, blue: 0.957, alpha: 1)
+        })
 }
 
 extension Color {
-    // Resolves to `light` or `dark` based on the current interface style,
-    // the same dynamic-color shape UIKit/AppKit expect.
-    init(light: Color, dark: Color) {
-        self.init(UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
-        })
-    }
-
     init(hex: UInt32) {
         self.init(
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
-        )
+            red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255,
+            blue: Double(hex & 255) / 255)
     }
 }
 
-// The single accent treatment BRANDING.md section 4 describes for a screen's one
-// primary action: a gradient fill behind clear Liquid Glass. This is a floating
-// action button, not a toolbar style — toolbar items should stay plain glass,
-// which the system already provides automatically.
-struct AccentGlassButtonStyle: ButtonStyle {
+struct MosaicBackground: ViewModifier {
+    @AppStorage("monochrome") private var monochrome = false
+    func body(content: Content) -> some View {
+        content.background(monochrome ? Color(uiColor: .systemBackground) : MosaicTheme.warmBackground)
+    }
+}
+
+extension View {
+    func mosaicBackground() -> some View { modifier(MosaicBackground()) }
+}
+
+struct SectionEyebrow: View {
+    let text: String
+    var body: some View {
+        Text(text.uppercased()).font(.caption.weight(.semibold)).tracking(2).foregroundStyle(.secondary)
+    }
+}
+
+struct ConnectLibraryView: View {
+    @Environment(LibraryStore.self) private var store
+    @State private var importing = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 24).fill(.quaternary).frame(width: 164, height: 196)
+                    .rotationEffect(.degrees(-12)).offset(x: -37, y: 9)
+                RoundedRectangle(cornerRadius: 24).fill(.tertiary.opacity(0.3)).frame(width: 164, height: 196)
+                    .rotationEffect(.degrees(10)).offset(x: 36, y: 3)
+                RoundedRectangle(cornerRadius: 24).fill(.background).frame(width: 164, height: 196)
+                    .overlay {
+                        Image(systemName: "photo.on.rectangle.angled").font(
+                            .system(size: 52, weight: .ultraLight)
+                        ).foregroundStyle(.primary)
+                    }
+            }
+            .frame(maxWidth: .infinity).frame(height: 250).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Your library.").font(.system(.largeTitle, design: .rounded, weight: .bold)).tracking(-1)
+                Text("Choose photos or open files to get started.")
+                    .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(spacing: 14) {
+                Button {
+                    if store.authorization == .denied || store.authorization == .restricted {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    } else {
+                        Task { await store.connectPhotos() }
+                    }
+                } label: {
+                    Label(
+                        store.authorization == .denied ? "Open Photo Settings" : "Connect Photos",
+                        systemImage: "photo.badge.plus"
+                    )
+                    .font(.headline).foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 17)
+                    .background(MosaicTheme.accent, in: Capsule()).glassEffect(.clear.interactive())
+                }
+                Button("Open from Files", systemImage: "folder") { importing = true }
+                    .font(.subheadline.weight(.medium)).tint(.primary).padding(8)
+            }
+        }
+        .padding(28)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) {
+            result in
+            switch result {
+            case .success(let urls): Task { await store.openFiles(urls) }
+            case .failure(let error): store.message = error.localizedDescription
+            }
+        }
+    }
+}
+
+// Viewer icon buttons keep a 44-point hit area even when their SF Symbol is small.
+struct MediaControlButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.title2.weight(.semibold))
-            .foregroundStyle(.white)
-            .frame(width: 56, height: 56)
-            .background(BrandPalette.accentGradient, in: Circle())
-            .glassEffect(.clear.interactive(), in: Circle())
-            .opacity(configuration.isPressed ? 0.85 : 1)
+        configuration.label.frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.55 : 1)
     }
-}
-
-extension ButtonStyle where Self == AccentGlassButtonStyle {
-    static var accentGlass: AccentGlassButtonStyle { AccentGlassButtonStyle() }
 }
