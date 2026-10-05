@@ -1,0 +1,20 @@
+.DS_Store
+build/
+DerivedData/
+.swiftpm/
+.build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+.swift-version
+
+# Signing material. Keys and profiles stay in Actions secrets.
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
