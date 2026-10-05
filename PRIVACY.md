@@ -6,6 +6,8 @@ Mosaic has no account, advertising, analytics SDK, or hosted media service. It d
 
 Mosaic saves Photos identifiers, file/folder bookmarks, filenames and basic metadata, collections, favorites, and playback positions in its application storage. Optional text recognition saves recognized text locally. Visual grouping saves small color/composition descriptors in a rebuildable cache. Normal iOS device backup rules apply to application metadata; caches are disposable.
 
+The metadata archive uses iOS file protection until the first device unlock after restart. File reads and organization reject paths that escape a connected folder through traversal or symbolic links.
+
 Original media remain where they are unless you explicitly confirm a batch in Auto organize’s Original files mode. Photos-library originals are never moved. Viewing can create thumbnails and temporary representations. Original media exported for sharing and S3 images downloaded for viewing use temporary storage, cleaned up when the viewer closes. Unexpected termination can leave temporary files until iOS or a later maintenance pass removes them.
 
 Disconnecting a folder or forgetting a file removes its active reference from Mosaic, not the original. Collection/favorite identifiers may remain for disconnected or temporarily inaccessible sources. Clearing the text index removes recognized text; clearing the visual cache removes color/composition analysis.
@@ -19,6 +21,8 @@ Photos access may include all assets or a user-selected subset. Files and folder
 Opening cloud-only Photos media can download it through Apple. A Files provider may fetch metadata or media from its service while listing a folder, generating a thumbnail, or opening a selected item. Its own authentication and privacy policies apply.
 
 A configured S3 connection sends signed read requests directly to the specified HTTPS endpoint when browsing or opening objects. This can incur the provider’s usual request and transfer charges. Media is never relayed through a Mosaic server. S3 videos stream; images may download to temporary storage. No S3 object is uploaded, edited, or deleted.
+
+S3 listing and image transfers use ephemeral network sessions without persistent URL caches, cookies, or credential storage. They reject redirects and enforce received-byte limits, including when the server omits Content-Length. Native video streaming is handled separately by AVKit.
 
 S3 credentials are stored in Keychain with device-only accessibility after first unlock. They do not sync through iCloud Keychain. Disconnecting deletes the saved credentials. Nextcloud, Proton Drive, Google Drive, and iCloud provider credentials stay under their respective apps’ control.
 

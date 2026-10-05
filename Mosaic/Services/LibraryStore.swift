@@ -23,6 +23,7 @@ final class LibraryStore {
     var message: String?
     var storageFailed = false
     private let repository: ArchiveRepository
+    private let isolated: Bool
     private var changeObserver: PhotoChanges?
     private var saveTask: Task<Void, Never>?
     var items: [MediaItem] {
@@ -41,7 +42,10 @@ final class LibraryStore {
     var collections: [MediaCollection] { archive.collections }
     var hasPhotoAccess: Bool { authorization == .authorized || authorization == .limited }
 
-    init(repository: ArchiveRepository = ArchiveRepository()) { self.repository = repository }
+    init(repository: ArchiveRepository = ArchiveRepository(), isolated: Bool = false) {
+        self.repository = repository
+        self.isolated = isolated
+    }
 
     // Restore metadata before allowing mutations; otherwise a fast tap could be lost.
     func start() async {
@@ -50,6 +54,10 @@ final class LibraryStore {
             storageFailed = true
             message =
                 "Your saved library could not be read. It has been left untouched. \(error.localizedDescription)"
+        }
+        if isolated {
+            isReady = true
+            return
         }
         changeObserver = PhotoChanges { [weak self] in Task { @MainActor in await self?.refreshPhotos() } }
         if let changeObserver { PHPhotoLibrary.shared().register(changeObserver) }
@@ -65,6 +73,7 @@ final class LibraryStore {
     }
 
     func refreshPhotos() async {
+        guard !isolated else { return }
         authorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard hasPhotoAccess, !isLoading else {
             if !hasPhotoAccess { photos = [] }
@@ -166,6 +175,7 @@ final class LibraryStore {
     // Called at startup, foreground entry, pull-to-refresh, and manual refresh.
     // Directory listing reads metadata only; thumbnails remain lazy and on demand.
     func refreshFolders() async {
+        guard !isolated else { return }
         guard !scanningFolders, !organizingFiles, archive.pendingFileMove == nil, !folders.isEmpty else {
             return
         }

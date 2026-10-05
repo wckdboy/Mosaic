@@ -28,7 +28,7 @@ Screenshots use simulator sample media. No sample media ships with the app.
 - Recursive discovery in folders you explicitly connect—including nested Downloads folders.
 - Horizontal or vertical gallery browsing, adjustable density, date grouping, filename/format/year search, and sorting.
 - Favorites, named collections, multi-selection, and quick organization actions.
-- Full-screen viewing with pinch/double-tap zoom, directional paging, GIF/APNG playback, Live Photos, metadata, and sharing.
+- Full-screen viewing with pinch/double-tap zoom, directional paging, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
 
 ### Mosaic canvas
 
@@ -114,7 +114,7 @@ Add a connection with an HTTPS endpoint, bucket, region, and read credentials. B
 - Credentials are stored in this device’s Keychain, not in source files or UserDefaults.
 - The browser uses paginated `ListObjectsV2` requests and folder prefixes.
 - Object access uses Signature V4 URLs generated when needed; signed URLs are not persisted.
-- Videos stream through the native player. Images up to 100 MB are temporarily downloaded for viewing and removed on dismissal.
+- Videos stream through the native player. Images up to 100 MB are temporarily downloaded for viewing and removed on dismissal. Listing and image transfers enforce actual byte limits, use ephemeral sessions, and reject redirects; listings also have XML depth, field, and object-count limits.
 - Connections are read-only. Required S3 permissions are `s3:ListBucket` and `s3:GetObject` for the chosen bucket/objects.
 - Disconnecting removes saved credentials; it changes nothing on the server.
 
@@ -130,7 +130,9 @@ Mosaic/
   Features/      Library, Mosaic, collections, batch organization, viewer, settings
   Theme/         Neutral surfaces and restrained glass controls
 MosaicTests/     Persistence, format classification, S3 signing, discovery,
-                 subtitle parsing, grouping, viewport bounds, rename/move/Undo recovery
+                 subtitle parsing, grouping, rename/move/Undo recovery, security regressions,
+                 and large-library clock/memory benchmarks
+MosaicUITests/   Isolated UI journeys, accessibility audits, and screenshot attachments
 scripts/         Synthetic media fixtures and reproducible vector icon rendering
 ```
 
@@ -138,7 +140,7 @@ scripts/         Synthetic media fixtures and reproducible vector icon rendering
 
 `LibraryStore` is the main-actor source of truth. Photos identifiers and security-scoped bookmarks refer to originals. `ArchiveRepository` serializes atomic metadata writes on an actor. A corrupt archive is preserved rather than silently replaced.
 
-Photos thumbnails use `PHCachingImageManager`; file thumbnails use downsampling and a 64 MB cost-bounded cache. Grid work is lazy. Viewer images are bounded to display-oriented resolutions, while videos use native streaming/decoding. Cancellation and identity checks prevent old requests from painting reused cells. Folder discovery reads metadata on an actor and preserves previous results if a provider is unavailable.
+Photos thumbnails use `PHCachingImageManager`; file thumbnails use downsampling and a 64 MB cost-bounded cache, with at most three concurrent decodes. Grid work is lazy. Viewer images are bounded to display-oriented resolutions, while videos use native streaming/decoding. Cancellation and identity checks prevent old requests from painting reused cells or replacing newer viewer state. Folder discovery reads metadata on an actor and preserves previous results if a provider is unavailable.
 
 `MosaicCanvasLayout` caches geometry and uses a spatial hash to return only visible tiles. Similarity compares against at most 32 representatives, avoiding an all-pairs quadratic comparison. Analysis is off the UI actor and cached. This is an implementation strategy, **not yet a measured frame-rate guarantee** for large real-world libraries.
 
@@ -157,6 +159,23 @@ xcodebuild test \
 
 Choose an installed simulator name if yours differs. Tests use temporary files and AWS’s public signing example; they do not contact a cloud service or require credentials.
 
+UI tests launch with `--ui-testing`, generating 60 procedural images in a separate temporary archive. This fixture is compiled only in Debug builds, resets on launch, and never requests Photos or provider access. Tests exercise discovery round trips, batch preview/apply/Undo, horizontal gallery transitions, light/dark accessibility semantics and hit regions, and the largest accessibility text size. Screenshots are retained in the Xcode test result.
+
+The iOS 27 text-clipping audit falsely flags the native **Insert field** menu label at XXXL. A screenshot/hierarchy review verified the full label; the test excludes only that issue while also requiring the control to be hittable and fully above the pinned action button. Other clipping and description failures remain failures.
+
+Performance tests record five clock/memory iterations for 1,000 viewport queries in a 50,000-item canvas, name grouping and collision-heavy renaming of 10,000 items, plus empty-query filtering. Generous time ceilings detect major algorithmic regressions; simulator measurements do not establish real-device frame rate, battery use, or thermal behavior.
+
+October 5, 2026 reference measurements (Debug build, iPhone 18 Pro Max / iOS 27 simulator, five-iteration averages):
+
+| Operation | Mean time |
+| --- | ---: |
+| 1,000 visible-region queries, 50,000-item canvas | 20 ms total |
+| Name grouping, 10,000 items | 25 ms |
+| Collision-safe rename planning, 10,000 items | 91 ms |
+| Empty-query filtering, 10,000 items | 3.7 ms |
+
+Viewport measurement excludes the one-time layout construction. XCTest also records process memory; it does not measure a full gallery's sustained device memory or scroll hitch rate. Keep `.xcresult` artifacts when comparing machines or changes.
+
 Create synthetic visual fixtures with Pillow and FFmpeg:
 
 ```sh
@@ -170,7 +189,9 @@ xcrun simctl addmedia booted /tmp/mosaic-media/*.jpg \
 
 ### Verification and remaining work
 
-The current Xcode MCP test run passes **55 tests**. Development uses Xcode’s MCP build, test, and simulator-interaction tools. Automated tests cover the published [AWS Signature V4 vector](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html), atomic archive round trips and corruption, nested discovery, bookmark traversal rejection, collision-safe file moves, symlink confinement, move-journal recovery, persistent batch Undo, subtitle boundaries, and a 10,000-item canvas visibility case.
+The October 5, 2026 Xcode MCP full run passes **73 test cases**, including eight UI journeys/audits, six hardening regressions, and four performance benchmarks. Development uses Xcode’s MCP build, test, and simulator-interaction tools. Automated tests also cover the published [AWS Signature V4 vector](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html), atomic archive round trips and corruption, nested discovery, bookmark traversal rejection, collision-safe file moves, symlink confinement, move-journal recovery, persistent batch Undo, and subtitle boundaries. New hardening regressions exercise malformed cloud listings, oversized chunked responses, partial-download cleanup, cancelled viewer loads, and file-read confinement.
+
+This is a focused source review and simulator regression pass, not a comprehensive security assessment or a guarantee of stability on every media format and provider.
 
 Before a public release, test on physical iPhones/iPads with large libraries, cloud-only assets, disconnected providers, HDR/RAW samples, Bluetooth/AirPlay, Picture in Picture, VoiceOver, larger text sizes, memory pressure, and long-running playback. Real S3 and third-party provider account flows require credentialed device testing. External SRT/WebVTT captions currently render in Mosaic’s viewer, not inside system Picture in Picture. ASS/SSA, external audio, equalization, Chromecast, and a full alternate video decoder are not implemented.
 

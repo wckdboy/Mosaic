@@ -19,6 +19,7 @@ struct MosaicFilter: Equatable, Sendable {
             source == .all || (source == .photos ? item.isPhotoLibrary : !item.isPhotoLibrary)
         else { return false }
         let words = query.split(whereSeparator: \.isWhitespace)
+        if words.isEmpty { return true }
         let searchable =
             "\(item.name) \(item.kind.title) \(Calendar.current.component(.year, from: item.date)) \(text[item.id] ?? "")"
         return words.allSatisfy { searchable.localizedStandardContains(String($0)) }

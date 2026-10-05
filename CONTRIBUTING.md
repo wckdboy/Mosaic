@@ -24,7 +24,7 @@ File access, media indexing, and anything touching on-device ML models can affec
 The repository includes `.swift-format` with four-space indentation. Run:
 
 ```sh
-xcrun swift-format format --configuration .swift-format --in-place --recursive Mosaic MosaicTests
+xcrun swift-format format --configuration .swift-format --in-place --recursive Mosaic MosaicTests MosaicUITests
 ```
 
 Explain ownership, cancellation, persistence, and performance tradeoffs in comments. Avoid comments that simply repeat a statement. Keep explanatory product copy in Settings rather than expanding the browsing interface.
@@ -39,4 +39,6 @@ Explain ownership, cancellation, persistence, and performance tradeoffs in comme
 - Label interactive media cells explicitly; their images are decorative.
 - Respect Reduce Motion and preserve pan gestures while a photo is zoomed.
 
-The shared Mosaic scheme includes MosaicTests. Xcode MCP tools can build, run tests, and verify simulator interactions. A simulator pass does not substitute for hardware HDR/AirPlay/PiP or real file-provider testing.
+The shared Mosaic scheme includes MosaicTests and MosaicUITests. UI tests generate a separate temporary library using the Debug-only `--ui-testing` launch argument; they must never request access to a person's Photos library or cloud account. Keep accessibility audits and both swipe directions covered when changing browsing controls. Performance tests record clock/memory metrics with generous regression ceilings; compare equivalent hardware and build configurations.
+
+Xcode MCP tools can build, run tests, and verify simulator interactions. A simulator pass does not substitute for hardware HDR/AirPlay/PiP, VoiceOver traversal, sustained memory/energy profiling, or real file-provider testing.

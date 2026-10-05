@@ -41,7 +41,7 @@ final class MediaLoader {
                 let options = PHVideoRequestOptions()
                 options.isNetworkAccessAllowed = true
                 options.progressHandler = { [weak self] value, _, _, _ in
-                    Task { @MainActor in self?.progress = value }
+                    Task { @MainActor in if self?.generation == token { self?.progress = value } }
                 }
                 request = PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) {
                     [weak self] playerItem, info in
@@ -154,6 +154,7 @@ final class MediaLoader {
                     }
                 }
             } catch {
+                guard generation == token, !Task.isCancelled else { return }
                 fail(
                     "This file could not be opened. Reconnect its provider or open it again from Files. \(error.localizedDescription)"
                 )
@@ -162,12 +163,17 @@ final class MediaLoader {
     }
 
     func configure(_ item: AVPlayerItem, position: Double, autoplay: Bool) {
+        player?.pause()
+        if let ended { NotificationCenter.default.removeObserver(ended) }
+        statusObservation = nil
         let player = AVPlayer(playerItem: item)
         self.player = player
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
-        } catch { /* Playback still works without audio session customization. */  }
+        } catch {
+            // Playback still works without audio session customization.
+        }
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
                 guard let self, self.player?.currentItem === item else { return }
@@ -238,6 +244,7 @@ final class MediaLoader {
             return true
         } catch {
             try? FileManager.default.removeItem(at: target)
+            guard generation == token else { return false }
             shareError = "The original could not be prepared for sharing. Check your connection."
             return false
         }
@@ -249,6 +256,10 @@ final class MediaLoader {
     }
     func stop() {
         generation = UUID()
+        loading = false
+        error = nil
+        progress = 0
+        shareError = nil
         if let request { PHImageManager.default().cancelImageRequest(request) }
         request = nil
         player?.pause()

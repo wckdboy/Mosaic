@@ -3,11 +3,26 @@ import ImageIO
 import Photos
 import UIKit
 
-// File thumbnails are decoded serially on this actor and bounded by a cost-based cache.
+// File thumbnails share an actor-owned decode budget and cost-based cache.
 // The Photos manager provides its own optimized, cancellable thumbnail pipeline.
 actor ThumbnailService {
     static let shared = ThumbnailService()
     private let cache = NSCache<NSString, UIImage>()
+    private var activeDecodes = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    // Actor reentrancy alone does not limit asynchronous AVAssetImageGenerator
+    // work. Cap simultaneous decodes so fast flings cannot launch dozens of videos.
+    private func acquireDecode() async {
+        if activeDecodes < 3 {
+            activeDecodes += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    private func releaseDecode() {
+        if waiters.isEmpty { activeDecodes -= 1 } else { waiters.removeFirst().resume() }
+    }
     init() {
         cache.totalCostLimit = 64 * 1024 * 1024
         cache.countLimit = 400
@@ -20,21 +35,29 @@ actor ThumbnailService {
     func image(for item: MediaItem, pixels: Int) async -> UIImage? {
         let key = "\(item.thumbnailKey)-\(pixels)" as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        guard !Task.isCancelled, let access = try? FileAccess(item: item) else { return nil }
+        await acquireDecode()
+        defer { releaseDecode() }
+        guard !Task.isCancelled else { return nil }
+        // A previous request may have filled this entry while we waited.
+        if let cached = cache.object(forKey: key) { return cached }
+        guard let access = try? FileAccess(item: item) else { return nil }
         let image: UIImage?
         if item.kind == .video {
-            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: access.url))
-            generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: pixels, height: pixels)
-            if let result = try? await generator.image(at: .zero) {
-                image = UIImage(cgImage: result.image)
+            let request = VideoThumbnailRequest(url: access.url, pixels: pixels)
+            let result = try? await withTaskCancellationHandler {
+                try await request.image()
+            } onCancel: {
+                request.cancel()
+            }
+            if let result {
+                image = UIImage(cgImage: result)
             } else {
                 image = nil
             }
         } else {
             image = Self.downsample(url: access.url, pixels: pixels)
         }
-        if let image {
+        if let image, !Task.isCancelled {
             cache.setObject(image, forKey: key, cost: Int(image.size.width * image.size.height * 4))
         }
         withExtendedLifetime(access) {}
@@ -57,11 +80,27 @@ actor ThumbnailService {
     }
 }
 
+// AVFoundation's generator supports cancellation of an outstanding asynchronous
+// request. Configure it before publication, then expose only image/cancel: no
+// mutable generator settings cross the thumbnail actor's suspension boundary.
+private final class VideoThumbnailRequest: @unchecked Sendable {
+    private let generator: AVAssetImageGenerator
+    init(url: URL, pixels: Int) {
+        generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: pixels, height: pixels)
+    }
+    func image() async throws -> CGImage { try await generator.image(at: .zero).image }
+    func cancel() { generator.cancelAllCGImageGeneration() }
+}
+
 @MainActor final class PhotoThumbnailRequest {
     static let manager = PHCachingImageManager()
     private var request: PHImageRequestID?
+    private var generation = UUID()
     func load(_ item: MediaItem, pixels: Int, completion: @escaping (UIImage?) -> Void) {
         cancel()
+        let token = generation
         guard
             let asset = PHAsset.fetchAssets(withLocalIdentifiers: [item.photoIdentifier], options: nil)
                 .firstObject
@@ -77,11 +116,15 @@ actor ThumbnailService {
         request = Self.manager.requestImage(
             for: asset, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
             options: options
-        ) { image, _ in
-            Task { @MainActor in completion(image) }
+        ) { [weak self] image, _ in
+            Task { @MainActor in
+                guard self?.generation == token else { return }
+                completion(image)
+            }
         }
     }
     func cancel() {
+        generation = UUID()
         if let request { Self.manager.cancelImageRequest(request) }
         request = nil
     }

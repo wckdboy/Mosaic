@@ -68,7 +68,9 @@ actor MosaicAnalysis {
             try FileManager.default.createDirectory(
                 at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(cache).write(to: cacheURL, options: .atomic)
-        } catch { /* This is a rebuildable cache, not user-authored organization. */  }
+        } catch {
+            // This is a rebuildable cache, not user-authored organization.
+        }
     }
     func clear() {
         cache = [:]

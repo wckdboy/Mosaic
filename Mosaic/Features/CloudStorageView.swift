@@ -280,13 +280,10 @@ struct S3MediaViewer: View {
                             "This image is over 100 MB. Open it through a Files provider to view locally.")
                         return
                     }
-                    let (download, response) = try await URLSession.shared.download(from: url)
-                    guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-                        throw CloudError.response((response as? HTTPURLResponse)?.statusCode ?? 0)
-                    }
                     let target = URL.temporaryDirectory.appending(path: UUID().uuidString)
                         .appendingPathExtension((object.name as NSString).pathExtension)
-                    try FileManager.default.moveItem(at: download, to: target)
+                    _ = try await BoundedTransfer.read(
+                        URLRequest(url: url), limit: 100 * 1024 * 1024, to: target)
                     if Task.isCancelled {
                         try? FileManager.default.removeItem(at: target)
                         return

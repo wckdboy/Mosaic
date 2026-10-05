@@ -13,7 +13,8 @@ actor ArchiveRepository {
     func save(_ archive: LibraryArchive) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(archive).write(to: url, options: .atomic)
+        try JSONEncoder().encode(archive).write(
+            to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
 
@@ -24,26 +25,28 @@ final class FileAccess: @unchecked Sendable {
     private let scoped: Bool
     private let scopeURL: URL
     init(item: MediaItem) throws {
+        let root: URL
         if let bookmark = item.bookmark {
             var stale = false
-            let root = try URL(
-                resolvingBookmarkData: bookmark, options: .withoutUI, bookmarkDataIsStale: &stale)
-            scopeURL = root
-            if let relative = item.relativePath {
-                guard !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..") else {
-                    throw CocoaError(.fileReadInvalidFileName)
-                }
-                url = root.appending(path: relative)
-            } else {
-                url = root
-            }
+            root = try URL(resolvingBookmarkData: bookmark, options: .withoutUI, bookmarkDataIsStale: &stale)
         } else if let original = item.fileURL {
-            url = original
-            scopeURL = original
+            root = original
         } else {
             throw CocoaError(.fileNoSuchFile)
         }
-        scoped = scopeURL.startAccessingSecurityScopedResource()
+        scopeURL = root
+        let granted = root.startAccessingSecurityScopedResource()
+        do {
+            if let relative = item.relativePath {
+                url = try FileOrganizationService.confined(relative, root: root)
+            } else {
+                url = root
+            }
+            scoped = granted
+        } catch {
+            if granted { root.stopAccessingSecurityScopedResource() }
+            throw error
+        }
     }
     deinit { if scoped { scopeURL.stopAccessingSecurityScopedResource() } }
 }

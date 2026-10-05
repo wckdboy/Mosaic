@@ -163,10 +163,7 @@ actor S3Service {
         let url = try S3Signer.url(connection: connection, credentials: credentials, query: query)
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-            throw CloudError.response((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
+        let data = try await BoundedTransfer.read(request, limit: 4 * 1024 * 1024)
         return try S3ListingParser.parse(data)
     }
     func mediaURL(connection: S3Connection, key: String) throws -> URL {
@@ -187,6 +184,7 @@ final class S3ListingParser: NSObject, XMLParserDelegate {
     private var modified = Date.distantPast
     private var rootSeen = false
     static func parse(_ data: Data) throws -> S3Page {
+        guard data.count <= 4 * 1024 * 1024 else { throw CloudError.invalidListing }
         let delegate = S3ListingParser()
         let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false
@@ -200,14 +198,27 @@ final class S3ListingParser: NSObject, XMLParserDelegate {
     ) {
         path.append(elementName)
         text = ""
-        if elementName == "ListBucketResult" { rootSeen = true }
+        if path.count == 1 {
+            guard elementName == "ListBucketResult" else {
+                parser.abortParsing()
+                return
+            }
+            rootSeen = true
+        }
+        if path.count > 16 { parser.abortParsing() }
         if elementName == "Contents" {
             key = ""
             size = 0
             modified = .distantPast
         }
     }
-    func parser(_ parser: XMLParser, foundCharacters string: String) { text += string }
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard text.utf8.count + string.utf8.count <= 65536 else {
+            parser.abortParsing()
+            return
+        }
+        text += string
+    }
     func parser(
         _ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
         qualifiedName qName: String?
@@ -222,6 +233,10 @@ final class S3ListingParser: NSObject, XMLParserDelegate {
                 modified = format.date(from: text) ?? ISO8601DateFormatter().date(from: text) ?? .distantPast
             case "Contents":
                 if !key.hasSuffix("/") {
+                    guard !key.isEmpty, size >= 0, page.objects.count < 1000 else {
+                        parser.abortParsing()
+                        return
+                    }
                     page.objects.append(S3Object(key: key, size: size, modified: modified))
                 }
             default: break

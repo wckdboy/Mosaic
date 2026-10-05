@@ -128,7 +128,7 @@ struct MediaBrowser: View {
                 } label: {
                     Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel("Library options")
+                .accessibilityLabel("Library options").accessibilityIdentifier("library.options")
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -225,6 +225,7 @@ struct MediaBrowser: View {
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel("\(item.name), \(item.kind.title)")
+                                    .accessibilityIdentifier("media-\(item.id)")
                                     .accessibilityValue(selection.contains(item.id) ? "Selected" : "")
                                     .contextMenu {
                                         Button("Find similar", systemImage: "square.on.square") {
@@ -286,6 +287,7 @@ struct MediaBrowser: View {
                                     .frame(width: tileSize, height: tileSize)
                                 }.buttonStyle(.plain)
                                     .accessibilityLabel("\(item.name), \(item.kind.title)")
+                                    .accessibilityIdentifier("media-\(item.id)")
                                     .contextMenu {
                                         Button("Find similar", systemImage: "square.on.square") {
                                             similar = item

@@ -141,7 +141,7 @@ actor FileOrganizationService {
         var stale = false
         return try URL(resolvingBookmarkData: bookmark, options: .withoutUI, bookmarkDataIsStale: &stale)
     }
-    private static func confined(_ relative: String, root: URL) throws -> URL {
+    static func confined(_ relative: String, root: URL) throws -> URL {
         guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..")
         else { throw CocoaError(.fileReadInvalidFileName) }
         // resolvingSymlinksInPath may leave the whole path unresolved when its

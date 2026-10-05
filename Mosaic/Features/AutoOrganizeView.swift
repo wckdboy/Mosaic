@@ -5,6 +5,7 @@ import SwiftUI
 struct AutoOrganizeView: View {
     @Environment(LibraryStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var textSize
     var selectedIDs: Set<String>? = nil
     @State private var options = OrganizationOptions()
     @State private var changes: [OrganizationChange] = []
@@ -69,16 +70,18 @@ struct AutoOrganizeView: View {
                             }.pickerStyle(.segmented)
                             Toggle("Rename", isOn: $options.rename)
                             if options.rename {
-                                TextField("Naming pattern", text: $options.pattern)
+                                // Wrap long patterns at accessibility text sizes so
+                                // the complete editable value remains visible.
+                                TextField("Naming pattern", text: $options.pattern, axis: .vertical)
+                                    .lineLimit(1...4)
                                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack {
-                                        ForEach(OrganizationPlanner.tokens, id: \.self) { token in
-                                            Button(token) { options.pattern += token }.font(
-                                                .caption.monospaced()
-                                            )
-                                            .buttonStyle(.bordered)
-                                        }
+                                // A native menu exposes every field at accessibility
+                                // sizes without a second scrolling direction.
+                                if textSize.isAccessibilitySize {
+                                    Menu("Insert field") { patternTokens }
+                                } else {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack { patternTokens }.buttonStyle(.bordered)
                                     }
                                 }
                             }
@@ -127,7 +130,10 @@ struct AutoOrganizeView: View {
                                         MediaThumbnail(item: change.item).frame(width: 48, height: 48)
                                             .clipShape(.rect(cornerRadius: 8))
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(change.name).font(.subheadline).lineLimit(2)
+                                            // A rename preview must expose the entire
+                                            // proposed name before it can be applied.
+                                            Text(change.name).font(.subheadline)
+                                                .fixedSize(horizontal: false, vertical: true)
                                             if change.name != change.item.name {
                                                 Text(change.item.name).font(.caption).foregroundStyle(
                                                     .secondary
@@ -229,6 +235,16 @@ struct AutoOrganizeView: View {
                 movePreview = preview
                 plannedRequest = snapshot
                 planning = false
+            }
+        }
+    }
+    private var patternTokens: some View {
+        ForEach(OrganizationPlanner.tokens, id: \.self) { token in
+            Button {
+                options.pattern += token
+            } label: {
+                Text(token).font(.caption.monospaced())
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

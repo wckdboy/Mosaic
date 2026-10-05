@@ -4,6 +4,8 @@ import SwiftUI
 // own task so typing or adjusting filters never restarts the analysis batch.
 struct MosaicView: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var compactHeight: Bool { verticalSizeClass == .compact }
     var seed: MediaItem? = nil
     @AppStorage("mosaicGrouping") private var groupingRaw = MosaicGrouping.color.rawValue
     @AppStorage("visualCacheVersion") private var visualCacheVersion = 0
@@ -71,7 +73,7 @@ struct MosaicView: View {
                 }
             }
         }
-        .overlay(alignment: .bottom) { canvasControls }
+        .overlay(alignment: .bottom) { if !compactHeight { canvasControls } }
         .safeAreaInset(edge: .top, spacing: 0) { discoveryBar }
         .mosaicBackground()
         .navigationTitle(seed == nil ? "Mosaic" : "Find similar")
@@ -98,7 +100,7 @@ struct MosaicView: View {
                         .clipShape(.rect(cornerRadius: 10)).accessibilityLabel("Reference: \(seed.name)")
                 }
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search your media", text: $filter.query)
+                TextField("Search your media", text: $filter.query).accessibilityIdentifier("mosaic.search")
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .submitLabel(.search).focused($searchFocused).onSubmit { searchFocused = false }
                 if !filter.query.isEmpty {
@@ -106,6 +108,19 @@ struct MosaicView: View {
                         .labelStyle(.iconOnly).foregroundStyle(.secondary)
                 }
                 Menu {
+                    // Pinch remains the primary landscape zoom gesture. These
+                    // explicit actions keep zoom/grouping accessible while a
+                    // single header row leaves more of the canvas visible.
+                    if compactHeight {
+                        Menu(seed == nil ? "Group by" : "Match by") {
+                            Picker("Grouping", selection: grouping) {
+                                ForEach(MosaicGrouping.allCases) {
+                                    Label($0.rawValue, systemImage: $0.symbol).tag($0.rawValue)
+                                }
+                            }
+                        }
+                        Menu("Zoom") { canvasActions }
+                    }
                     Picker("Media", selection: $filter.kind) {
                         Text("All media").tag(nil as MediaItem.Kind?)
                         ForEach(MediaItem.Kind.allCases, id: \.self) { kind in
@@ -128,42 +143,48 @@ struct MosaicView: View {
                             ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease"
                     )
                     .frame(minWidth: 32, minHeight: 44)
-                }.accessibilityLabel(filter.isActive ? "Filters active" : "Filter media")
+                }.accessibilityLabel(
+                    compactHeight ? "Canvas options" : filter.isActive ? "Filters active" : "Filter media")
             }.padding(.horizontal, 14).padding(.vertical, 4)
                 .background(.primary.opacity(0.045), in: .rect(cornerRadius: 20))
-            HStack {
-                Menu {
-                    Picker(seed == nil ? "Group by" : "Match by", selection: grouping) {
-                        ForEach(MosaicGrouping.allCases) {
-                            Label($0.rawValue, systemImage: $0.symbol).tag($0.rawValue)
+            if !compactHeight {
+                HStack {
+                    Menu {
+                        Picker(seed == nil ? "Group by" : "Match by", selection: grouping) {
+                            ForEach(MosaicGrouping.allCases) {
+                                Label($0.rawValue, systemImage: $0.symbol).tag($0.rawValue)
+                            }
                         }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(mode.rawValue).font(.subheadline.weight(.medium))
-                        Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                    }.padding(.vertical, 8)
-                }.accessibilityLabel(seed == nil ? "Group by \(mode.rawValue)" : "Match by \(mode.rawValue)")
-                Spacer()
-                Text(clusters.reduce(0) { $0 + $1.items.count }.formatted())
-                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                if analyzing { ProgressView().controlSize(.mini) }
-            }.padding(.horizontal, 4)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(mode.rawValue).font(.subheadline.weight(.medium))
+                            Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                        }.padding(.vertical, 8)
+                    }.accessibilityLabel(
+                        seed == nil ? "Group by \(mode.rawValue)" : "Match by \(mode.rawValue)")
+                    Spacer()
+                    Text(clusters.reduce(0) { $0 + $1.items.count }.formatted())
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    if analyzing { ProgressView().controlSize(.mini) }
+                }.padding(.horizontal, 4)
+            }
         }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4).mosaicBackground()
     }
     private var canvasControls: some View {
         HStack(spacing: 4) {
-            Button("Zoom out", systemImage: "minus.magnifyingglass") { zoom = max(0.4, zoom - 0.2) }
-            Button("Reset zoom", systemImage: "arrow.up.left.and.arrow.down.right") {
-                zoom = zoom == 1 ? 0.999 : 1
-            }
-            Button("Zoom in", systemImage: "plus.magnifyingglass") { zoom = min(2, zoom + 0.2) }
-            if visualAnalysis {
-                Divider().frame(height: 18).padding(.horizontal, 4)
-                Button("Analyze more", systemImage: "arrow.clockwise") { batch += 1 }.disabled(analyzing)
-            }
+            canvasActions
         }.labelStyle(.iconOnly).buttonStyle(MediaControlButtonStyle()).padding(6)
             .glassEffect().padding(.bottom, 14)
+    }
+    @ViewBuilder private var canvasActions: some View {
+        Button("Zoom out", systemImage: "minus.magnifyingglass") { zoom = max(0.4, zoom - 0.2) }
+        Button("Reset zoom", systemImage: "arrow.up.left.and.arrow.down.right") {
+            zoom = zoom == 1 ? 0.999 : 1
+        }
+        Button("Zoom in", systemImage: "plus.magnifyingglass") { zoom = min(2, zoom + 0.2) }
+        if visualAnalysis {
+            Button("Analyze more", systemImage: "arrow.clockwise") { batch += 1 }.disabled(analyzing)
+        }
     }
     private func buildIndex() async {
         let items = store.items

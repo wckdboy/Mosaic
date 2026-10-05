@@ -10,6 +10,8 @@ struct MediaViewer: View {
     let initialID: String
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var compactHeight: Bool { verticalSizeClass == .compact }
     @State private var index: Int
     @State private var playback = PlaybackTools()
     @State private var locked = false
@@ -116,8 +118,8 @@ struct MediaViewer: View {
             case .playback: PlaybackOptionsView(tools: playback, loader: loader) { locked = true }
             }
         }
-        .accessibilityAction(named: "Next item") { move(1) }
-        .accessibilityAction(named: "Previous item") { move(-1) }
+        // Previous/Next already have explicit accessible controls. Attaching
+        // those actions to the entire container makes static labels actionable.
     }
     @ViewBuilder private var media: some View {
         if let error = loader.error {
@@ -146,9 +148,13 @@ struct MediaViewer: View {
             Button("Close", systemImage: "xmark") { dismiss() }.labelStyle(.iconOnly).buttonStyle(.glass)
                 .buttonBorderShape(.circle).controlSize(.large)
             VStack(spacing: 3) {
-                Text(item?.date.formatted(date: .abbreviated, time: .omitted) ?? "").font(
-                    .subheadline.weight(.semibold))
-                Text(item?.name ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if !compactHeight {
+                    Text(item?.date.formatted(date: .abbreviated, time: .omitted) ?? "").font(
+                        .subheadline.weight(.semibold))
+                }
+                Text(item?.name ?? "").accessibilityIdentifier("viewer.filename").font(.caption)
+                    .accessibilityLabel("Filename").accessibilityValue(item?.name ?? "")
+                    .foregroundStyle(.secondary).lineLimit(1)
             }.frame(maxWidth: .infinity)
             if item?.kind == .video {
                 Button("Playback options", systemImage: "slider.horizontal.3") { sheet = .playback }
@@ -162,11 +168,13 @@ struct MediaViewer: View {
             }
             .accessibilityLabel("Media options").buttonStyle(.glass)
             .buttonBorderShape(.circle).controlSize(.large)
-        }.padding(.horizontal, 18).padding(.vertical, 12).background(.black)
+        }.padding(.horizontal, 18).padding(.vertical, compactHeight ? 4 : 12).background(.black)
     }
     private var bottomBar: some View {
         VStack(spacing: 16) {
-            if item?.kind == .video, loader.player != nil {
+            // Native transport and Playback options retain these actions when
+            // landscape height is scarce; media gets the reclaimed space.
+            if !compactHeight, item?.kind == .video, loader.player != nil {
                 HStack(spacing: 24) {
                     Button("Back \(skipInterval) seconds", systemImage: "gobackward.\(skipInterval)") {
                         seek(-Double(skipInterval))
@@ -202,14 +210,18 @@ struct MediaViewer: View {
                 }
                 Spacer()
                 Button("Next", systemImage: "chevron.right") { move(1) }.disabled(index + 1 >= items.count)
-            }.labelStyle(.iconOnly).font(.title3).buttonStyle(MediaControlButtonStyle()).padding(18)
+            }.labelStyle(.iconOnly).font(.title3).buttonStyle(MediaControlButtonStyle())
+                .padding(compactHeight ? 8 : 18)
                 .glassEffect()
             if let shareError = loader.shareError {
                 Text(shareError).font(.caption).foregroundStyle(.secondary)
             }
-            Text("\(index + 1) of \(items.count)").font(.caption2).foregroundStyle(.secondary)
-                .monospacedDigit()
-        }.padding(.horizontal, 20).padding(.bottom, 8).padding(.top, 12).background(.black)
+            if !compactHeight {
+                Text("\(index + 1) of \(items.count)").font(.caption2).foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }.padding(.horizontal, 20).padding(.bottom, compactHeight ? 4 : 8)
+            .padding(.top, compactHeight ? 4 : 12).background(.black)
     }
     // Only the configured axis pages. Zoomed images retain pan gestures, and the
     // video transport's bottom region retains scrubbing instead of changing media.
