@@ -19,6 +19,16 @@ struct VisualDescriptor: Codable, Sendable, Equatable {
     var theme: String?
     // L2-normalized feature print, quantized to Int8 (×127). Cosine similarity is a dot product.
     var feature: Data?
+    // Number of people Vision detected (fast tier).
+    var people: Int?
+    // Precise tier (Apple Intelligence): a one-line caption and lowercase tag phrases
+    // for objects, people, activities, settings, and ideas.
+    var caption: String?
+    var tags: [String]?
+    var detailed: Bool?
+    // Averaged word-embedding vector of every label, tag, and caption word (Int8, unit
+    // length), so searches for ideas can rank conceptually related media.
+    var meaning: Data?
 
     var isCurrent: Bool { (version ?? 1) >= Self.currentVersion }
     var dominantRGB: UInt32? { palette?.first }

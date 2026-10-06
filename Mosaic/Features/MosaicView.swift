@@ -21,6 +21,9 @@ struct MosaicView: View {
     @FocusState private var searchFocused: Bool
     @State private var clusters: [MosaicCluster] = []
     @State private var tints: [String: UInt32] = [:]
+    @State private var suggestions: [String] = []
+    // The last item explored or opened; the crosshair brings it back into view.
+    @State private var selectedID: String?
     @State private var revision = UUID()
     // Starts true so the empty state never flashes before the first projection.
     @State private var projecting = true
@@ -35,10 +38,17 @@ struct MosaicView: View {
     private var focus: MediaItem? { trail.last }
     private var overviewMode: MosaicGrouping { MosaicGrouping(rawValue: groupingRaw) ?? .color }
     private var mode: MosaicGrouping { focus == nil ? overviewMode : matchMode }
+    private var searching: Bool { focus == nil && !MediaSemantics.words(filter.query).isEmpty }
     private var contextKey: String {
-        focus.map { "focus-\($0.id)-\(matchMode.rawValue)" } ?? "overview-\(overviewMode.rawValue)"
+        if let focus { return "focus-\(focus.id)-\(matchMode.rawValue)" }
+        let terms = MediaSemantics.words(filter.query).joined(separator: " ")
+        return terms.isEmpty ? "overview-\(overviewMode.rawValue)" : "search-\(terms)"
     }
 
+    private struct SuggestionKey: Equatable {
+        let revision: Int
+        let active: Bool
+    }
     private struct Projection: Equatable {
         let items: [MediaItem]
         let focus: MediaItem?
@@ -63,6 +73,7 @@ struct MosaicView: View {
     var body: some View {
         MosaicCanvas(
             clusters: clusters, revision: revision, context: contextKey, focused: focus != nil,
+            anchorsAtStart: searching, selectedID: selectedID,
             tints: tints, favorites: store.favorites, command: command,
             onTap: { item in explore(item) },
             onOpen: { item in open(item) },
@@ -99,6 +110,12 @@ struct MosaicView: View {
             if trail.isEmpty, let seed { trail = [seed] }
         }
         .task(id: projection) { await project() }
+        .task(id: SuggestionKey(revision: shownIndexRevision, active: searchFocused || !filter.query.isEmpty)) {
+            guard searchFocused || !filter.query.isEmpty else { return }
+            let visual = indexer.descriptors
+            let result = await Task.detached(priority: .utility) { Self.topTags(visual) }.value
+            if !Task.isCancelled { suggestions = result }
+        }
         .onChange(of: indexer.revision) { _, _ in
             // Apply automatically while the canvas has little analysis to disturb.
             if shownAnalyzedCount == 0 || (focus != nil && indexer.descriptors[focus!.id] != nil
@@ -130,7 +147,12 @@ struct MosaicView: View {
             }
             if !compactHeight {
                 HStack(spacing: 8) {
-                    modeChips
+                    // While searching, the chip row offers smart filters instead of groupings.
+                    if focus == nil && (searchFocused || !filter.query.isEmpty) {
+                        suggestionChips
+                    } else {
+                        modeChips
+                    }
                     statusBadge
                 }
             }
@@ -200,6 +222,38 @@ struct MosaicView: View {
             return "\(descriptor.color) tones"
         }
         return "\(label) · \(descriptor.color)"
+    }
+
+    // Starter filters always work (themes, people, kinds); the rest are the most common
+    // tags in this library, so suggestions reflect what is actually there.
+    static let starterFilters = ["People", "Animals", "Food", "Nature", "Night", "Documents", "Videos"]
+    private var suggestionChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Self.starterFilters + suggestions.filter { tag in
+                    !Self.starterFilters.contains { $0.lowercased() == tag.lowercased() }
+                }, id: \.self) { suggestion in
+                    let selected = filter.query.lowercased() == suggestion.lowercased()
+                    Button {
+                        filter.query = selected ? "" : suggestion.lowercased()
+                        searchFocused = false
+                    } label: {
+                        Text(suggestion.capitalized)
+                            .font(.subheadline.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 7)
+                            .foregroundStyle(selected ? Color(uiColor: .systemBackground) : .primary)
+                            .background(selected ? Color.primary : Color.primary.opacity(0.06), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Search \(suggestion)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+        .mask {
+            LinearGradient(
+                stops: [.init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                startPoint: .leading, endPoint: .trailing)
+        }
     }
 
     private var modeChips: some View {
@@ -308,7 +362,7 @@ struct MosaicView: View {
     @ViewBuilder private var zoomActions: some View {
         Button("Zoom out", systemImage: "minus.magnifyingglass") { send(.zoomOut) }
         Button("Show all", systemImage: "arrow.down.right.and.arrow.up.left") { send(.fit) }
-        Button("Recenter", systemImage: "scope") { send(.recenter) }
+        Button(focus == nil ? "Go to selection" : "Fit reference", systemImage: "scope") { send(.recenter) }
         Button("Zoom in", systemImage: "plus.magnifyingglass") { send(.zoomIn) }
     }
 
@@ -319,6 +373,7 @@ struct MosaicView: View {
     }
     private func explore(_ item: MediaItem) {
         searchFocused = false
+        selectedID = item.id
         guard item.id != focus?.id else {
             open(item)
             return
@@ -339,6 +394,7 @@ struct MosaicView: View {
     }
     private func open(_ item: MediaItem) {
         searchFocused = false
+        selectedID = item.id
         viewer = ViewerRoute(items: clusters.flatMap(\.items), selectedID: item.id)
     }
     private func applyIndex() {
@@ -359,8 +415,23 @@ struct MosaicView: View {
         let favorites = store.favorites
         let (result, colors) = await Task.detached(priority: .userInitiated) {
             () -> ([MosaicCluster], [String: UInt32]) in
+            // Kind, favorites, and source narrow first; the query then ranks what remains.
+            var narrowing = request.filter
+            narrowing.query = ""
             let items = request.items.filter {
-                request.filter.matches($0, favorites: favorites, text: request.text, visual: visual)
+                narrowing.matches($0, favorites: favorites, text: request.text, visual: visual)
+            }
+            let search = MosaicSearch(request.filter.query)
+            if request.focus == nil, !search.isEmpty {
+                let ranked = search.rank(items, descriptors: visual, text: request.text)
+                var clusters: [MosaicCluster] = []
+                if !ranked.matches.isEmpty {
+                    clusters.append(MosaicCluster(id: "search-matches", title: "Best matches", items: ranked.matches))
+                }
+                if !ranked.related.isEmpty {
+                    clusters.append(MosaicCluster(id: "search-related", title: "Related", items: ranked.related))
+                }
+                return (clusters, Self.tints(clusters, visual))
             }
             let sentiments =
                 request.mode == .sentiment
@@ -405,6 +476,23 @@ private struct IndexingBadge: View {
 }
 
 extension MosaicView {
+    // The library's most common precise tags and scene labels, for suggestion chips.
+    nonisolated static func topTags(_ visual: [String: VisualDescriptor], limit: Int = 14) -> [String] {
+        let generic: Set<String> = [
+            "outdoor", "indoor", "structure", "material", "textile", "liquid", "water_body", "people",
+            "adult", "sky", "plant", "land", "wood_processed",
+        ]
+        var counts: [String: Int] = [:]
+        for descriptor in visual.values {
+            for tag in descriptor.tags ?? [] where tag.count <= 18 { counts[tag, default: 0] += 2 }
+            for label in (descriptor.labels ?? []).prefix(3) where !generic.contains(label) {
+                counts[MediaTheme.readable(label), default: 0] += 1
+            }
+        }
+        return counts.filter { $0.value >= 3 }.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+            .prefix(limit).map(\.key)
+    }
+
     // Dominant colors paint placeholders so tiles never flash empty while decoding.
     nonisolated static func tints(_ clusters: [MosaicCluster], _ visual: [String: VisualDescriptor])
         -> [String: UInt32]

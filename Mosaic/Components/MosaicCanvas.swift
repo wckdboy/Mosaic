@@ -17,6 +17,9 @@ struct MosaicCanvas: UIViewRepresentable {
     // Distinct viewports are remembered per context, e.g. overview vs. each focus hop.
     let context: String
     var focused = false
+    // Search results open on their best match (the start of the world), not its middle.
+    var anchorsAtStart = false
+    var selectedID: String?
     var tints: [String: UInt32] = [:]
     var favorites: Set<String> = []
     var command: CanvasCommand?
@@ -84,6 +87,7 @@ struct MosaicCanvas: UIViewRepresentable {
         var favorites: Set<String> = []
         var lastCommand: CanvasCommand?
         weak var view: UICollectionView?
+        private var paths: [String: IndexPath] = [:]
         private var startScale: CGFloat = 1
         // SwiftUI can deliver the first projection before the view has a size;
         // centering then waits for the first real layout pass.
@@ -117,17 +121,28 @@ struct MosaicCanvas: UIViewRepresentable {
             favorites = canvas.favorites
             let update = {
                 self.clusters = canvas.clusters
+                self.paths = [:]
+                for (section, cluster) in canvas.clusters.enumerated() {
+                    for (index, item) in cluster.items.enumerated() where self.paths[item.id] == nil {
+                        self.paths[item.id] = IndexPath(item: index, section: section)
+                    }
+                }
                 layout.focused = canvas.focused
+                layout.anchorsAtStart = canvas.anchorsAtStart
                 layout.clusters = canvas.clusters
                 // A tap keeps the current zoom; only returning to a saved context restores one.
                 if changedContext, let saved = self.viewports[canvas.context]?.scale {
                     layout.scale = saved
+                } else if changedContext, canvas.focused {
+                    // A tapped item is framed larger, with a ring of related media around it.
+                    layout.scale = self.heroFitScale(view)
                 }
                 self.map.reset()
                 view.reloadData()
                 view.layoutIfNeeded()
                 self.updateInsets(view)
                 self.updateMap(view)
+                self.announceZoom(view)
                 if changedContext || firstLoad {
                     // Saved viewports restore only when returning to an earlier context.
                     let saved = changedContext ? self.viewports[canvas.context]?.center : nil
@@ -163,7 +178,17 @@ struct MosaicCanvas: UIViewRepresentable {
                     view, to: layout.fitScale, anchor: nil, animated: true,
                     focus: CGPoint(x: size.width / 2, y: size.height / 2))
             case .recenter:
-                zoom(view, to: 1, anchor: nil, animated: true, focus: layout.focusPoint, force: true)
+                if layout.focused {
+                    zoom(view, to: heroFitScale(view), anchor: nil, animated: true, focus: layout.focusPoint, force: true)
+                    highlight(IndexPath(item: 0, section: 0), in: view)
+                } else if let id = parent.selectedID, let path = paths[id], let frame = layout.baseFrame(at: path) {
+                    // Bring the selection back: framed at about a third of the screen, then pulsed.
+                    let scale = min(1.6, max(MosaicCanvasLayout.detailScale + 0.1, 0.36 * view.bounds.width / frame.width))
+                    zoom(view, to: scale, anchor: nil, animated: true, focus: CGPoint(x: frame.midX, y: frame.midY), force: true)
+                    highlight(path, in: view)
+                } else {
+                    zoom(view, to: 1, anchor: nil, animated: true, focus: layout.focusPoint, force: true)
+                }
             }
         }
 
@@ -176,6 +201,28 @@ struct MosaicCanvas: UIViewRepresentable {
             } else {
                 clamp(view)
             }
+        }
+
+        // The reference tile fills about half the shorter screen side.
+        func heroFitScale(_ view: UICollectionView) -> CGFloat {
+            let side = min(view.bounds.width, view.bounds.height)
+            guard side > 0 else { return 1 }
+            return min(1.5, max(0.5, side * 0.52 / MosaicCanvasLayout.heroSide))
+        }
+        private func highlight(_ path: IndexPath, in view: UICollectionView) {
+            guard !reduceMotion else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                guard let cell = view.cellForItem(at: path) else { return }
+                UIView.animateKeyframes(withDuration: 0.5, delay: 0) {
+                    UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.4) {
+                        cell.transform = CGAffineTransform(scaleX: 1.08, y: 1.08)
+                    }
+                    UIView.addKeyframe(withRelativeStartTime: 0.4, relativeDuration: 0.6) { cell.transform = .identity }
+                }
+            }
+        }
+        func announceZoom(_ view: UICollectionView) {
+            view.accessibilityValue = "\(Int(((layout?.scale ?? 1) * 100).rounded())) percent zoom"
         }
 
         // MARK: Viewport math. Centers are stored in unscaled layout coordinates.
@@ -230,6 +277,7 @@ struct MosaicCanvas: UIViewRepresentable {
                 view.layoutIfNeeded()
                 self.updateInsets(view)
                 self.updateMap(view)
+                self.announceZoom(view)
                 let target =
                     focus.map {
                         CGPoint(x: $0.x * next - view.bounds.width / 2, y: $0.y * next - view.bounds.height / 2)
@@ -423,6 +471,8 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     var clusters: [MosaicCluster] = [] { didSet { dirty = true } }
     // Focused layouts spiral ranked items outward from a centered hero (item 0).
     var focused = false { didSet { if focused != oldValue { dirty = true } } }
+    var anchorsAtStart = false { didSet { if anchorsAtStart != oldValue { dirty = true } } }
+    static var heroSide: CGFloat { 2 * (unit + gap) - gap }
     var scale: CGFloat = 1 {
         didSet {
             scale = Self.clampScale(scale)
@@ -531,7 +581,7 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
             x += width + Self.islandGap
         }
         baseSize = CGSize(width: maxX + Self.islandGap / 2, height: y + shelf + Self.islandGap / 2)
-        focusPoint = CGPoint(x: baseSize.width / 2, y: baseSize.height / 2)
+        focusPoint = anchorsAtStart ? .zero : CGPoint(x: baseSize.width / 2, y: baseSize.height / 2)
     }
 
     static func pack(count: Int) -> (cells: [(col: Int, row: Int, span: Int)], cols: Int, rows: Int) {

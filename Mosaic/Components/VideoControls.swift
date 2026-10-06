@@ -254,7 +254,8 @@ struct CaptionOverlay: View {
             Text(caption).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
                 .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 6)
                 .background(.black.opacity(0.7), in: .rect(cornerRadius: 8))
-                .padding(.horizontal, 24).padding(.bottom, raised ? 190 : 40)
+                // Clears the bottom control cluster (transport, quick row, scrubber, actions).
+                .padding(.horizontal, 24).padding(.bottom, raised ? 300 : 40)
                 .allowsHitTesting(false)
                 .animation(.easeOut(duration: 0.2), value: raised)
         }

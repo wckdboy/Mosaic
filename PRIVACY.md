@@ -28,7 +28,7 @@ S3 credentials are stored in Keychain with device-only accessibility after first
 
 ## On-device analysis
 
-Text recognition uses Apple Vision after an explicit Settings action. Visual analysis (color palette, Apple Vision scene labels, and a Vision feature print used for similarity) runs on-device from small local thumbnails, never downloads iCloud originals or cloud-only files, and can be turned off or cleared in Settings. Neither sends content to an external AI service. Sentiment uses filenames and optionally recognized text, not an inference about people in photos.
+Text recognition uses Apple Vision after an explicit Settings action. Visual analysis (color palette, Apple Vision scene labels, and a Vision feature print used for similarity) runs on-device from small local thumbnails, never downloads iCloud originals or cloud-only files, and can be turned off or cleared in Settings. With Apple Intelligence available and Detailed descriptions on, Apple’s on-device Foundation Model additionally writes a short caption and search tags from a small thumbnail; requests use the on-device model only. People are described generically by appearance (for example "woman" or "group"); Mosaic does not identify people, store faces, or guess names, ages, or health. Neither sends content to an external AI service. Sentiment uses filenames and optionally recognized text, not an inference about people in photos.
 
 ## Sharing
 

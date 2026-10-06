@@ -120,6 +120,46 @@ import XCTest
         map.tap()
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
     }
+    // Tapping frames the item larger; the crosshair restores that framing, and in the
+    // overview it brings the last selection back into view.
+    func testTapFitsItemAndCrosshairRecenters() {
+        launch()
+        app.buttons["Mosaic view"].tap()
+        let canvas = app.collectionViews["mosaic.canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        app.cells.element(boundBy: 4).tap()
+        XCTAssertTrue(app.buttons["mosaic.focus"].waitForExistence(timeout: 5))
+        sleep(1)
+        let fitted = canvas.value as? String
+        XCTAssertNotNil(fitted)
+        canvas.pinch(withScale: 0.5, velocity: -1)
+        sleep(1)
+        XCTAssertNotEqual(canvas.value as? String, fitted)
+        app.buttons["Fit reference"].tap()
+        sleep(1)
+        XCTAssertEqual(canvas.value as? String, fitted)
+        app.buttons["Back to Mosaic"].tap()
+        XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
+        sleep(1)
+        let overview = canvas.value as? String
+        app.buttons["Go to selection"].tap()
+        sleep(1)
+        XCTAssertNotEqual(canvas.value as? String, overview)
+    }
+    func testSearchRanksResultsAndOffersSmartFilters() {
+        launch()
+        app.buttons["Mosaic view"].tap()
+        let search = app.textFields["mosaic.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        XCTAssertTrue(app.buttons["Search People"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Search Animals"].exists)
+        search.typeText("study\n")
+        XCTAssertTrue(app.descendants(matching: .any)["Best matches, 60 items"].waitForExistence(timeout: 5))
+        capture("Ranked search")
+        app.buttons["Clear search"].tap()
+        XCTAssertTrue(app.buttons["Group by Color"].waitForExistence(timeout: 5))
+    }
     func testOrganizationPreviewApplyUndoAndPhysicalExclusion() throws {
         launch()
         app.buttons["library.options"].tap()
@@ -187,6 +227,9 @@ import XCTest
         XCTAssertTrue(app.buttons["Unmute"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Back 10 seconds"].isHittable)
         XCTAssertTrue(app.buttons["Forward 10 seconds"].isHittable)
+        // Transport sits in the bottom cluster, within one-handed thumb reach.
+        let screen = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(playPause.frame.midY, screen.minY + screen.height * 0.6)
         capture("Video controls")
         try app.performAccessibilityAudit(for: [.hitRegion, .sufficientElementDescription, .trait])
         // A tap on the picture hides all chrome; a second tap restores it.

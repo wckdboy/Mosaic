@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage("resumePlayback") private var resumePlayback = true
     @AppStorage("visualCacheVersion") private var visualCacheVersion = 0
     @AppStorage("visualAnalysis") private var visualAnalysis = true
+    @AppStorage("detailedDescriptions") private var detailedDescriptions = true
     @AppStorage("textRecognition") private var textRecognition = false
     var body: some View {
         NavigationStack {
@@ -84,6 +85,23 @@ struct SettingsView: View {
                                 .monospacedDigit()
                         }
                     }
+                    if visualAnalysis {
+                        Toggle("Detailed descriptions", isOn: $detailedDescriptions)
+                        if detailedDescriptions {
+                            if MediaDescriber.isAvailable {
+                                let indexer = MosaicIndexer.shared
+                                if indexer.describable > 0 {
+                                    LabeledContent(indexer.describing && indexer.paused ? "Described (paused)" : "Described") {
+                                        Text("\(indexer.described.formatted()) of \(indexer.describable.formatted())")
+                                            .monospacedDigit()
+                                    }
+                                }
+                            } else {
+                                Text("Requires Apple Intelligence. Search still uses on-device scene labels.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     Button("Clear visual analysis cache") {
                         Task {
                             await MosaicIndexer.shared.reset()
@@ -94,7 +112,7 @@ struct SettingsView: View {
                     Text("Mosaic canvas")
                 } footer: {
                     Text(
-                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs gently in the background (faster while charging) and pauses while you view media, when Mosaic is closed, or when your iPhone is warm. Tap any tile on the canvas to explore similar media; pinch to zoom, all the way out to see your whole library."
+                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. With Apple Intelligence, detailed descriptions add precise tags (objects, people described generically, activities, places, and ideas) using the on-device model, mostly while charging. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs gently in the background (faster while charging) and pauses while you view media, when Mosaic is closed, or when your iPhone is warm. Tap any tile on the canvas to explore similar media; pinch to zoom, all the way out to see your whole library."
                     )
                 }
                 Section {
