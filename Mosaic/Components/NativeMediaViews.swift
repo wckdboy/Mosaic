@@ -43,6 +43,7 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
     var onTap: (() -> Void)?
     var onZoomChange: ((Bool) -> Void)?
     var onInteraction: ((Bool) -> Void)?
+    var onFillChange: ((Bool) -> Void)?
     let doubleTap = UITapGestureRecognizer()
     let singleTap = UITapGestureRecognizer()
     private var needsFit = true
@@ -70,7 +71,8 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError("Storyboard initialization is not supported") }
 
-    var isZoomedIn: Bool { zoomScale > minimumZoomScale + 0.01 }
+    // "Fill" is a baseline, not a zoom: it must not lock paging or swipe-to-close.
+    var isZoomedIn: Bool { zoomScale > (keepsFill ? fillScale : minimumZoomScale) + 0.01 }
     // The scale at which the fitted content covers the whole viewport.
     var fillScale: CGFloat {
         let size = content.bounds.size
@@ -101,6 +103,7 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
     func setFill(_ fill: Bool, animated: Bool) {
         keepsFill = fill
         setZoomScale(fill ? fillScale : 1, animated: animated)
+        report()
     }
     private func centerContent() {
         let dx = max(0, (bounds.width - contentSize.width) / 2)
@@ -110,6 +113,9 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
     }
     private func report() {
         let zoomed = isZoomedIn
+        // At the fill baseline the content overflows, but drags belong to paging.
+        let pans = zoomed || !keepsFill
+        if panGestureRecognizer.isEnabled != pans { panGestureRecognizer.isEnabled = pans }
         guard zoomed != reportedZoom else { return }
         reportedZoom = zoomed
         onZoomChange?(zoomed)
@@ -122,7 +128,10 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
     }
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { onInteraction?(true) }
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        if scale <= minimumZoomScale + 0.01 { keepsFill = false }
+        if keepsFill, scale <= minimumZoomScale + 0.01 {
+            keepsFill = false
+            onFillChange?(false)
+        }
         report()
         onInteraction?(false)
     }

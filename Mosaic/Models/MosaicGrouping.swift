@@ -351,7 +351,10 @@ enum MosaicClusterBuilder {
         for (index, members) in groups.enumerated() {
             var title = groupTitle(members, leader: leaders[index], descriptors: descriptors)
             used[title, default: 0] += 1
-            if let count = used[title], count > 1 { title += " \(count)" }
+            // Letters, not numbers: the island label already shows a count after the title.
+            if let count = used[title], count > 1 {
+                title += " " + String(UnicodeScalar(UInt8(64 + min(count, 26))))
+            }
             result.append(
                 MosaicCluster(
                     id: "group-\(index)", title: title,
@@ -380,7 +383,9 @@ enum MosaicClusterBuilder {
         if let label = counts.max(by: { $0.value == $1.value ? $0.key > $1.key : $0.value < $1.value })?.key {
             return "\(MediaTheme.readable(label).capitalized) · \(color)"
         }
-        return leader.theme.map { "\($0) · \(color)" } ?? "\(color) compositions"
+        // The fallback theme says nothing about the media; name the group by color.
+        guard let theme = leader.theme, theme != MediaTheme.fallback else { return "\(color) compositions" }
+        return "\(theme) · \(color)"
     }
 
     static func nameGroup(_ name: String) -> String {

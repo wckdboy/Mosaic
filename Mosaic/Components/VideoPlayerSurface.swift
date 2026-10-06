@@ -16,6 +16,7 @@ struct VideoPlayerSurface: UIViewRepresentable {
     var onDoubleTap: (PlaybackMath.Zone) -> Void = { _ in }
     var onHold: (Bool) -> Void = { _ in }
     var onZoomInteraction: (Bool) -> Void = { _ in }
+    var onFillChange: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
     // The player layer sits inside the shared zoom container: pinch zooms and pans the
@@ -65,6 +66,11 @@ struct VideoPlayerSurface: UIViewRepresentable {
         let binding = isZoomed
         view.onZoomChange = { zoomed in if binding.wrappedValue != zoomed { binding.wrappedValue = zoomed } }
         view.onInteraction = onZoomInteraction
+        let fillChanged = onFillChange
+        view.onFillChange = { [weak coordinator] fill in
+            coordinator?.appliedFill = fill
+            fillChanged(fill)
+        }
         if coordinator.appliedFill != fill {
             coordinator.appliedFill = fill
             view.setFill(fill, animated: animated && !UIAccessibility.isReduceMotionEnabled)

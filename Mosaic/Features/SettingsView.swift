@@ -94,7 +94,7 @@ struct SettingsView: View {
                     Text("Mosaic canvas")
                 } footer: {
                     Text(
-                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs gently in the background (faster while charging) and pauses while you view media, when Mosaic is closed, or when your iPhone is warm. Tap any tile on the canvas to explore similar media; pinch or double-tap to zoom."
+                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs gently in the background (faster while charging) and pauses while you view media, when Mosaic is closed, or when your iPhone is warm. Tap any tile on the canvas to explore similar media; pinch to zoom, all the way out to see your whole library."
                     )
                 }
                 Section {

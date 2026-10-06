@@ -7,6 +7,37 @@ struct CollectionsView: View {
     @State private var creating = false
     @State private var name = ""
     @State private var deleting: MediaCollection?
+    @State private var groups = Groups()
+    // Smart groups and memberships are derived in one background pass when inputs
+    // change, rather than filtering the whole library several times per render.
+    struct Groups: Sendable {
+        var favorites: [MediaItem] = []
+        var videos: [MediaItem] = []
+        var animated: [MediaItem] = []
+        var live: [MediaItem] = []
+        var members: [UUID: [MediaItem]] = [:]
+    }
+    private struct GroupKey: Equatable {
+        let items: [MediaItem]
+        let favorites: Set<String>
+        let collections: [MediaCollection]
+    }
+    private nonisolated static func derive(_ key: GroupKey) -> Groups {
+        var groups = Groups()
+        for item in key.items {
+            if key.favorites.contains(item.id) { groups.favorites.append(item) }
+            switch item.kind {
+            case .video: groups.videos.append(item)
+            case .animated: groups.animated.append(item)
+            case .livePhoto: groups.live.append(item)
+            case .photo: break
+            }
+            for collection in key.collections where collection.itemIDs.contains(item.id) {
+                groups.members[collection.id, default: []].append(item)
+            }
+        }
+        return groups
+    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -14,16 +45,16 @@ struct CollectionsView: View {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                         smartCollection(
                             "Favorites", symbol: "heart",
-                            items: store.items.filter { store.favorites.contains($0.id) })
+                            items: groups.favorites)
                         smartCollection(
                             "Videos", symbol: "play.rectangle",
-                            items: store.items.filter { $0.kind == .video })
+                            items: groups.videos)
                         smartCollection(
                             "Animated", symbol: "square.stack.3d.forward.dottedline",
-                            items: store.items.filter { $0.kind == .animated })
+                            items: groups.animated)
                         smartCollection(
                             "Live Photos", symbol: "livephoto",
-                            items: store.items.filter { $0.kind == .livePhoto })
+                            items: groups.live)
                     }
                     HStack {
                         Text("Your collections").font(.title3.weight(.semibold))
@@ -42,7 +73,7 @@ struct CollectionsView: View {
                             .quaternary.opacity(0.4), in: .rect(cornerRadius: 24))
                     } else {
                         ForEach(store.collections) { collection in
-                            let media = store.items.filter { collection.itemIDs.contains($0.id) }
+                            let media = groups.members[collection.id] ?? []
                             NavigationLink {
                                 MediaBrowser(title: collection.name, items: media, collection: collection)
                             } label: {
@@ -70,6 +101,11 @@ struct CollectionsView: View {
                 }.padding(20).padding(.bottom, 80)
             }
             .mosaicBackground().navigationTitle("Collections")
+            .task(id: GroupKey(items: store.items, favorites: store.favorites, collections: store.collections)) {
+                let key = GroupKey(items: store.items, favorites: store.favorites, collections: store.collections)
+                let derived = await Task.detached(priority: .userInitiated) { Self.derive(key) }.value
+                if !Task.isCancelled { groups = derived }
+            }
             .toolbar { Button("New collection", systemImage: "plus") { creating = true } }
             .alert("New collection", isPresented: $creating) {
                 TextField("Collection name", text: $name)
