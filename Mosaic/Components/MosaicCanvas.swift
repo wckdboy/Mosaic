@@ -48,11 +48,13 @@ struct MosaicCanvas: UIViewRepresentable {
             target: context.coordinator, action: #selector(Coordinator.pinch(_:)))
         pinch.delegate = context.coordinator
         view.addGestureRecognizer(pinch)
-        let doubleTap = UITapGestureRecognizer(
-            target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.delegate = context.coordinator
-        view.addGestureRecognizer(doubleTap)
+        // No double-tap zoom: on a canvas of tappable tiles it fires a selection first.
+        // In map mode (no cells), a single tap dives into the tapped region instead.
+        let mapTap = UITapGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.mapTap(_:)))
+        mapTap.delegate = context.coordinator
+        view.addGestureRecognizer(mapTap)
+        view.insertSubview(context.coordinator.map, at: 0)
         context.coordinator.view = view
         return view
     }
@@ -88,6 +90,9 @@ struct MosaicCanvas: UIViewRepresentable {
         private var pendingCenter: CGPoint?
         private var viewports: [String: (center: CGPoint, scale: CGFloat)] = [:]
         private var reduceMotion: Bool { UIAccessibility.isReduceMotionEnabled }
+        // Far zoom shows one pre-rendered bitmap of every item instead of thousands of cells.
+        let map = CanvasMapView(frame: .zero)
+        private var mapRevision: UUID?
 
         init(parent: MosaicCanvas) {
             self.parent = parent
@@ -114,12 +119,15 @@ struct MosaicCanvas: UIViewRepresentable {
                 self.clusters = canvas.clusters
                 layout.focused = canvas.focused
                 layout.clusters = canvas.clusters
-                if changedContext {
-                    layout.scale = self.viewports[canvas.context]?.scale ?? (canvas.focused ? 1 : layout.scale)
+                // A tap keeps the current zoom; only returning to a saved context restores one.
+                if changedContext, let saved = self.viewports[canvas.context]?.scale {
+                    layout.scale = saved
                 }
+                self.map.reset()
                 view.reloadData()
                 view.layoutIfNeeded()
                 self.updateInsets(view)
+                self.updateMap(view)
                 if changedContext || firstLoad {
                     // Saved viewports restore only when returning to an earlier context.
                     let saved = changedContext ? self.viewports[canvas.context]?.center : nil
@@ -145,13 +153,12 @@ struct MosaicCanvas: UIViewRepresentable {
         func perform(_ action: CanvasCommand.Action, in view: UICollectionView) {
             guard let layout else { return }
             switch action {
-            case .zoomIn: zoom(view, to: layout.scale * 1.4, anchor: nil, animated: true)
-            case .zoomOut: zoom(view, to: layout.scale / 1.4, anchor: nil, animated: true)
+            case .zoomIn: zoom(view, to: layout.scale * 1.6, anchor: nil, animated: true)
+            case .zoomOut: zoom(view, to: layout.scale / 1.6, anchor: nil, animated: true)
             case .fit:
                 let size = layout.baseSize
                 guard size.width > 0, view.bounds.width > 0 else { return }
-                let fit = min(view.bounds.width / size.width, view.bounds.height / size.height) * 0.94
-                zoom(view, to: fit, anchor: nil, animated: true)
+                zoom(view, to: layout.fitScale, anchor: nil, animated: true)
                 center(view, on: CGPoint(x: size.width / 2, y: size.height / 2), animated: !reduceMotion)
             case .recenter:
                 zoom(view, to: 1, anchor: nil, animated: true)
@@ -161,6 +168,7 @@ struct MosaicCanvas: UIViewRepresentable {
 
         func resized(_ view: UICollectionView) {
             updateInsets(view)
+            updateMap(view)
             if let point = pendingCenter {
                 pendingCenter = nil
                 center(view, on: point)
@@ -204,7 +212,7 @@ struct MosaicCanvas: UIViewRepresentable {
         }
         private func zoom(_ view: UICollectionView, to value: CGFloat, anchor: CGPoint?, animated: Bool) {
             guard let layout else { return }
-            let next = MosaicCanvasLayout.clampScale(value)
+            let next = min(MosaicCanvasLayout.scaleRange.upperBound, max(layout.minimumScale, value))
             let previous = layout.scale
             guard abs(next - previous) > 0.001 else { return }
             // The anchor is a point in the viewport that stays under the finger.
@@ -217,6 +225,7 @@ struct MosaicCanvas: UIViewRepresentable {
                 layout.invalidateLayout()
                 view.layoutIfNeeded()
                 self.updateInsets(view)
+                self.updateMap(view)
                 view.contentOffset = self.clamped(
                     CGPoint(x: contentPoint.x * next - anchorInView.x, y: contentPoint.y * next - anchorInView.y),
                     in: view)
@@ -258,16 +267,38 @@ struct MosaicCanvas: UIViewRepresentable {
             default: break
             }
         }
-        @objc func doubleTap(_ recognizer: UITapGestureRecognizer) {
-            guard let view = recognizer.view as? UICollectionView, let layout else { return }
+        @objc func mapTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? UICollectionView, let layout, !layout.showsCells else { return }
             let anchor = recognizer.location(in: view).applying(
                 CGAffineTransform(translationX: -view.contentOffset.x, y: -view.contentOffset.y))
-            zoom(view, to: layout.scale < 1.6 ? layout.scale * 2 : 1, anchor: anchor, animated: true)
+            zoom(view, to: max(MosaicCanvasLayout.detailScale * 1.6, 0.7), anchor: anchor, animated: true)
+        }
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Taps on cells are selections; the map tap only exists while cells are hidden.
+            if gestureRecognizer is UITapGestureRecognizer { return layout?.showsCells == false }
+            return true
         }
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
         ) -> Bool { gestureRecognizer is UIPinchGestureRecognizer }
+
+        // The map tracks the content frame; it renders lazily the first time it is
+        // needed for a projection and is hidden whenever real tiles are on screen.
+        func updateMap(_ view: UICollectionView) {
+            guard let layout else { return }
+            map.frame = CGRect(origin: .zero, size: layout.collectionViewContentSize)
+            let visible = !layout.showsCells
+            if visible && mapRevision != revision {
+                mapRevision = revision
+                map.render(frames: layout.allFrames(), clusters: clusters, tints: tints, world: layout.baseSize)
+            }
+            let alpha: CGFloat = visible ? 1 : 0
+            if map.alpha != alpha {
+                if reduceMotion { map.alpha = alpha } else { UIView.animate(withDuration: 0.2) { self.map.alpha = alpha } }
+            }
+            map.accessibilityElementsHidden = !visible
+        }
 
         // MARK: Data
 
@@ -375,7 +406,9 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     static let gap: CGFloat = 4
     static let islandGap: CGFloat = 64
     static let headerSpace: CGFloat = 44
-    static let scaleRange: ClosedRange<CGFloat> = 0.3...3
+    static let scaleRange: ClosedRange<CGFloat> = 0.005...3
+    // Below this scale tiles would be smaller than ~40 pt: the map replaces cells.
+    static let detailScale: CGFloat = 0.36
     static func clampScale(_ value: CGFloat) -> CGFloat {
         min(scaleRange.upperBound, max(scaleRange.lowerBound, value))
     }
@@ -402,6 +435,16 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     override var collectionViewContentSize: CGSize {
         CGSize(width: baseSize.width * scale, height: baseSize.height * scale)
     }
+    var showsCells: Bool { scale >= Self.detailScale }
+    // The whole world fits the viewport at this scale ("Show all").
+    var fitScale: CGFloat {
+        let viewport = collectionView?.bounds.size ?? CGSize(width: 400, height: 800)
+        guard baseSize.width > 0, baseSize.height > 0, viewport.width > 0 else { return 1 }
+        return min(1, min(viewport.width / baseSize.width, viewport.height / baseSize.height) * 0.94)
+    }
+    // Zooming out stops once every item is on screen, never earlier.
+    var minimumScale: CGFloat { max(Self.scaleRange.lowerBound, min(0.3, fitScale)) }
+    func allFrames() -> [[CGRect]] { frames }
     func baseFrame(at path: IndexPath) -> CGRect? {
         frames.indices.contains(path.section) && frames[path.section].indices.contains(path.item)
             ? frames[path.section][path.item] : nil
@@ -517,7 +560,7 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
         return (cells, cols, rows)
     }
 
-    // Item 0 sits at the center as a 3×3 hero. Remaining items take the nearest free
+    // Item 0 sits at the center as a 2×2 hero (larger reads as an unwanted zoom). Remaining items take the nearest free
     // cells in an ellipse slightly taller than wide (portrait screens), so similarity
     // decreases smoothly in every direction the user pans.
     private func buildSpiral() {
@@ -531,16 +574,16 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
             return
         }
         let cells = Self.spiralCells(count: items - 1)
-        let minCol = min(-1, cells.map(\.0).min() ?? 0)
-        let minRow = min(-1, cells.map(\.1).min() ?? 0)
+        let minCol = min(0, cells.map(\.0).min() ?? 0)
+        let minRow = min(0, cells.map(\.1).min() ?? 0)
         let maxCol = max(1, cells.map(\.0).max() ?? 0)
         let maxRow = max(1, cells.map(\.1).max() ?? 0)
         let pad = Self.islandGap
         func origin(_ col: Int, _ row: Int) -> CGPoint {
             CGPoint(x: pad + CGFloat(col - minCol) * step, y: pad + CGFloat(row - minRow) * step)
         }
-        let hero = origin(-1, -1)
-        var result = [CGRect(x: hero.x, y: hero.y, width: 3 * step - Self.gap, height: 3 * step - Self.gap)]
+        let hero = origin(0, 0)
+        var result = [CGRect(x: hero.x, y: hero.y, width: 2 * step - Self.gap, height: 2 * step - Self.gap)]
         result += cells.map { cell in
             let point = origin(cell.0, cell.1)
             return CGRect(x: point.x, y: point.y, width: Self.unit, height: Self.unit)
@@ -554,13 +597,15 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
 
     static func spiralCells(count: Int) -> [(Int, Int)] {
         guard count > 0 else { return [] }
-        var radius = Int((Double(count + 9).squareRoot() / 2).rounded(.up)) + 1
+        var radius = Int((Double(count + 4).squareRoot() / 2).rounded(.up)) + 1
         while true {
             var candidates: [(col: Int, row: Int, distance: Double, angle: Double)] = []
-            for row in -radius...radius {
-                for col in -radius...radius where abs(col) > 1 || abs(row) > 1 {
-                    let distance = Double(col * col) + Double(row * row) * 0.8
-                    candidates.append((col, row, distance, atan2(Double(row), Double(col))))
+            for row in -radius...(radius + 1) {
+                for col in -radius...(radius + 1) where !((0...1).contains(col) && (0...1).contains(row)) {
+                    // Measured from the hero's center (0.5, 0.5) in doubled integer units.
+                    let dx = Double(2 * col - 1)
+                    let dy = Double(2 * row - 1)
+                    candidates.append((col, row, dx * dx + dy * dy * 0.8, atan2(dy, dx)))
                 }
             }
             if candidates.count >= count {
@@ -593,10 +638,13 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
         for x in minX...maxX {
             for y in minY...maxY {
                 let key = bucketKey(x, y)
-                for path in buckets[key] ?? [] where !seenCells.contains(path) {
-                    guard let frame = baseFrame(at: path), frame.intersects(base) else { continue }
-                    seenCells.insert(path)
-                    if let attributes = layoutAttributesForItem(at: path) { result.append(attributes) }
+                // In map mode the whole world may be in view; skip per-item work entirely.
+                if showsCells {
+                    for path in buckets[key] ?? [] where !seenCells.contains(path) {
+                        guard let frame = baseFrame(at: path), frame.intersects(base) else { continue }
+                        seenCells.insert(path)
+                        if let attributes = layoutAttributesForItem(at: path) { result.append(attributes) }
+                    }
                 }
                 for section in headerBuckets[key] ?? [] where !seenHeaders.contains(section) {
                     seenHeaders.insert(section)

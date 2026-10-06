@@ -72,7 +72,7 @@ final class LibraryStore {
             isReady = true
             return
         }
-        changeObserver = PhotoChanges { [weak self] in Task { @MainActor in await self?.refreshPhotos() } }
+        changeObserver = PhotoChanges { [weak self] in Task { @MainActor in self?.photosChanged() } }
         if let changeObserver { PHPhotoLibrary.shared().register(changeObserver) }
         await recoverFileMove()
         isReady = true
@@ -85,6 +85,17 @@ final class LibraryStore {
         await refreshPhotos()
     }
 
+    // iCloud sync can post change notifications in rapid bursts. Coalesce them so a
+    // burst costs one library enumeration rather than one per notification.
+    private var changeTask: Task<Void, Never>?
+    private func photosChanged() {
+        changeTask?.cancel()
+        changeTask = Task {
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            await refreshPhotos()
+        }
+    }
+
     func refreshPhotos() async {
         guard !isolated else { return }
         authorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -93,7 +104,13 @@ final class LibraryStore {
             return
         }
         isLoading = true
-        photos = await Task.detached(priority: .userInitiated) {
+        // Resource lookups for filenames are the slowest part of enumeration; reuse
+        // names for assets whose modification date has not changed.
+        var known: [String: (modified: Date?, name: String)] = [:]
+        known.reserveCapacity(photos.count)
+        for item in photos { known[item.id] = (item.modified, item.name) }
+        let previous = known
+        let refreshed = await Task.detached(priority: .utility) {
             let options = PHFetchOptions()
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
             let assets = PHAsset.fetchAssets(with: options)
@@ -101,8 +118,13 @@ final class LibraryStore {
             result.reserveCapacity(assets.count)
             assets.enumerateObjects { asset, _, _ in
                 guard asset.mediaType == .image || asset.mediaType == .video else { return }
-                let resource = PHAssetResource.assetResources(for: asset).first
-                let name = resource?.originalFilename ?? "Untitled"
+                let id = "photos:\(asset.localIdentifier)"
+                let name: String
+                if let cached = previous[id], cached.modified == asset.modificationDate {
+                    name = cached.name
+                } else {
+                    name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "Untitled"
+                }
                 let kind: MediaItem.Kind =
                     asset.mediaType == .video
                     ? .video
@@ -110,12 +132,14 @@ final class LibraryStore {
                         ? .livePhoto : MediaItem.kind(for: URL(fileURLWithPath: name)) ?? .photo
                 result.append(
                     MediaItem(
-                        id: "photos:\(asset.localIdentifier)", name: name, kind: kind,
+                        id: id, name: name, kind: kind,
                         date: asset.creationDate ?? .distantPast, duration: asset.duration,
                         width: asset.pixelWidth, height: asset.pixelHeight, modified: asset.modificationDate))
             }
             return result
         }.value
+        // Unchanged libraries must not invalidate every view observing items.
+        if refreshed != photos { photos = refreshed }
         isLoading = false
     }
 

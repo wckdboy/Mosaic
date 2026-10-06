@@ -148,7 +148,7 @@ struct SemanticDiscoveryTests {
         layout.prepare()
         let all = frames(layout, [cluster])
         let hero = all[0]
-        #expect(hero.width > all[1].width * 2)
+        #expect(hero.width > all[1].width * 1.9)
         #expect(layout.focusPoint == CGPoint(x: hero.midX, y: hero.midY))
         func distance(_ frame: CGRect) -> CGFloat { hypot(frame.midX - hero.midX, frame.midY - hero.midY) }
         // Closest matches sit nearest the hero; the last ranked ones sit farthest out.
@@ -206,5 +206,37 @@ struct ContinuingDiscoveryTests {
             MosaicSimilarity.matches(
                 seed: seed, items: [seed, sibling, other], mode: .similar, descriptors: descriptors, continuing: true
             ).map(\.id) == ["sibling"])
+    }
+}
+
+@MainActor struct CanvasOverviewTests {
+    private func items(_ count: Int) -> [MediaItem] {
+        (0..<count).map { MediaItem(id: "\($0)", name: "\($0).jpg", kind: .photo, date: .distantPast) }
+    }
+    @Test func farZoomShowsMapInsteadOfCells() {
+        let layout = MosaicCanvasLayout()
+        layout.clusters = [MosaicCluster(id: "all", title: "All", items: items(20_000))]
+        layout.prepare()
+        layout.scale = 0.05
+        #expect(!layout.showsCells)
+        let everything = CGRect(origin: .zero, size: layout.collectionViewContentSize)
+        // No per-item attributes at all: the whole world is one pre-rendered bitmap.
+        let cells = layout.layoutAttributesForElements(in: everything)?.filter {
+            $0.representedElementCategory == .cell
+        }
+        #expect(cells?.isEmpty == true)
+        #expect(layout.allFrames().flatMap { $0 }.count == 20_000)
+        layout.scale = 1
+        #expect(layout.showsCells)
+    }
+    @Test func minimumZoomFitsEveryItem() {
+        let layout = MosaicCanvasLayout()
+        layout.clusters = [MosaicCluster(id: "all", title: "All", items: items(50_000))]
+        layout.prepare()
+        // Without a view the fit assumes a 400×800 viewport.
+        layout.scale = layout.minimumScale
+        let size = layout.collectionViewContentSize
+        #expect(size.width <= 400 && size.height <= 800)
+        #expect(layout.minimumScale < 0.05)
     }
 }

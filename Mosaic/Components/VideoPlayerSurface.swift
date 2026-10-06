@@ -11,15 +11,23 @@ struct VideoPlayerSurface: UIViewRepresentable {
     var fill = false
     var enabled = true
     let pictureInPicture: PictureInPictureModel
+    var isZoomed: Binding<Bool> = .constant(false)
     var onTap: () -> Void = {}
     var onDoubleTap: (PlaybackMath.Zone) -> Void = { _ in }
     var onHold: (Bool) -> Void = { _ in }
-    var onPinch: (Bool) -> Void = { _ in }
+    var onZoomInteraction: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeUIView(context: Context) -> PlayerLayerView {
-        let view = PlayerLayerView()
-        view.playerLayer.player = player
+    // The player layer sits inside the shared zoom container: pinch zooms and pans the
+    // picture, and "fill" is simply the zoom that covers the screen.
+    func makeUIView(context: Context) -> ZoomScrollView {
+        let layerView = PlayerLayerView()
+        layerView.playerLayer.player = player
+        layerView.playerLayer.videoGravity = .resizeAspect
+        let view = ZoomScrollView(content: layerView)
+        // Double-tap skips in video, so the container's own taps stay off.
+        view.doubleTap.isEnabled = false
+        view.singleTap.isEnabled = false
         let coordinator = context.coordinator
         coordinator.surface = self
         let double = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.doubleTap(_:)))
@@ -28,38 +36,67 @@ struct VideoPlayerSurface: UIViewRepresentable {
         single.require(toFail: double)
         let hold = UILongPressGestureRecognizer(target: coordinator, action: #selector(Coordinator.hold(_:)))
         hold.minimumPressDuration = 0.4
-        let pinch = UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinch(_:)))
-        for recognizer in [double, single, hold, pinch] as [UIGestureRecognizer] {
+        for recognizer in [double, single, hold] as [UIGestureRecognizer] {
             recognizer.delegate = coordinator
             view.addGestureRecognizer(recognizer)
         }
-        pictureInPicture.attach(view.playerLayer)
+        coordinator.observe(player, in: view)
+        pictureInPicture.attach(layerView.playerLayer)
         view.isAccessibilityElement = true
         view.accessibilityLabel = "Video"
-        view.accessibilityHint = "Double-tap to show or hide controls."
+        view.accessibilityIdentifier = "viewer.video"
+        view.accessibilityHint = "Double-tap to show or hide controls. Pinch to zoom."
+        apply(to: view, coordinator: coordinator, animated: false)
         return view
     }
-    func updateUIView(_ view: PlayerLayerView, context: Context) {
-        context.coordinator.surface = self
-        if view.playerLayer.player !== player { view.playerLayer.player = player }
-        let gravity: AVLayerVideoGravity = fill ? .resizeAspectFill : .resizeAspect
-        if view.playerLayer.videoGravity != gravity {
-            // Gravity is implicitly animated by Core Animation; that matches a pinch.
-            view.playerLayer.videoGravity = gravity
+    func updateUIView(_ view: ZoomScrollView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.surface = self
+        if let layerView = view.content as? PlayerLayerView, layerView.playerLayer.player !== player {
+            layerView.playerLayer.player = player
+            coordinator.observe(player, in: view)
         }
-        view.gestureRecognizers?.forEach { $0.isEnabled = enabled }
+        apply(to: view, coordinator: coordinator, animated: true)
+        view.gestureRecognizers?.forEach { recognizer in
+            if recognizer !== view.doubleTap && recognizer !== view.singleTap { recognizer.isEnabled = enabled }
+        }
     }
-    static func dismantleUIView(_ view: PlayerLayerView, coordinator: Coordinator) {
-        coordinator.surface?.pictureInPicture.detach(view.playerLayer)
-        view.playerLayer.player = nil
+    private func apply(to view: ZoomScrollView, coordinator: Coordinator, animated: Bool) {
+        let binding = isZoomed
+        view.onZoomChange = { zoomed in if binding.wrappedValue != zoomed { binding.wrappedValue = zoomed } }
+        view.onInteraction = onZoomInteraction
+        if coordinator.appliedFill != fill {
+            coordinator.appliedFill = fill
+            view.setFill(fill, animated: animated && !UIAccessibility.isReduceMotionEnabled)
+        }
+    }
+    static func dismantleUIView(_ view: ZoomScrollView, coordinator: Coordinator) {
+        coordinator.sizeObservation = nil
+        if let layerView = view.content as? PlayerLayerView {
+            coordinator.surface?.pictureInPicture.detach(layerView.playerLayer)
+            layerView.playerLayer.player = nil
+        }
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var surface: VideoPlayerSurface?
+        var appliedFill: Bool?
+        var sizeObservation: NSKeyValueObservation?
+        // The fitted frame follows the video's real aspect ratio once it is known.
+        @MainActor func observe(_ player: AVPlayer, in view: ZoomScrollView) {
+            sizeObservation = player.currentItem?.observe(\.presentationSize, options: [.initial, .new]) {
+                [weak view] item, _ in
+                let size = item.presentationSize
+                Task { @MainActor in
+                    guard let view, size.width > 0, size.height > 0 else { return }
+                    view.naturalSize = size
+                }
+            }
+        }
         @MainActor @objc func tap(_ recognizer: UITapGestureRecognizer) { surface?.onTap() }
         @MainActor @objc func doubleTap(_ recognizer: UITapGestureRecognizer) {
             guard let view = recognizer.view else { return }
-            let x = recognizer.location(in: view).x
+            let x = recognizer.location(in: view).x - view.bounds.minX
             surface?.onDoubleTap(PlaybackMath.zone(x: x, width: view.bounds.width))
         }
         @MainActor @objc func hold(_ recognizer: UILongPressGestureRecognizer) {
@@ -67,12 +104,6 @@ struct VideoPlayerSurface: UIViewRepresentable {
             case .began: surface?.onHold(true)
             case .ended, .cancelled, .failed: surface?.onHold(false)
             default: break
-            }
-        }
-        @MainActor @objc func pinch(_ recognizer: UIPinchGestureRecognizer) {
-            guard recognizer.state == .ended else { return }
-            if recognizer.scale > 1.08 { surface?.onPinch(true) } else if recognizer.scale < 0.92 {
-                surface?.onPinch(false)
             }
         }
         // The page drag lives in SwiftUI; never let these recognizers block it.
