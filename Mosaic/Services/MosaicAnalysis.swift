@@ -97,7 +97,7 @@ actor MosaicAnalysis {
             options.isNetworkAccessAllowed = false
             options.resizeMode = .fast
             PHImageManager.default().requestImage(
-                for: asset, targetSize: CGSize(width: 300, height: 300), contentMode: .aspectFill,
+                for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFill,
                 options: options
             ) { image, _ in continuation.resume(returning: image) }
         }
@@ -257,22 +257,26 @@ actor MosaicAnalysis {
 }
 
 // The library-wide index runs in the background whenever analysis is enabled, not
-// only while the canvas is visible. Work is newest-first, bounded in concurrency,
-// checkpointed to disk, paused in the background, and slowed under thermal pressure.
+// only while the canvas is visible. It is deliberately gentle: one item at a time on
+// battery (two while charging), paused while media is being viewed or the device is
+// warm, results published in batches, and the cache checkpointed rarely.
 @MainActor @Observable
 final class MosaicIndexer {
     static let shared = MosaicIndexer()
     private(set) var descriptors: [String: VisualDescriptor] = [:]
-    // Bumped when descriptors change, throttled so the canvas re-projects in batches.
+    // Bumped when published descriptors change, so the canvas can offer a refresh.
     private(set) var revision = 0
     private(set) var running = false
+    private(set) var paused = false
     private(set) var remaining = 0
     private(set) var total = 0
-    private var task: Task<Void, Never>?
-    private var priority: [MediaItem] = []
-    private var attempted: Set<String> = []
-    private var items: [MediaItem] = []
-    private var loadedCache = false
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var attempted: Set<String> = []
+    @ObservationIgnored private var items: [MediaItem] = []
+    @ObservationIgnored private var loadedCache = false
+    // Results wait here so observers re-render a few times a minute, not per item.
+    @ObservationIgnored private var unpublished: [String: VisualDescriptor] = [:]
+    @ObservationIgnored private var holds = 0
 
     var progress: Double { total == 0 ? 1 : Double(total - remaining) / Double(total) }
 
@@ -293,10 +297,14 @@ final class MosaicIndexer {
         restart()
     }
 
+    // Viewing media (especially video) and analysis compete for the same silicon.
+    func hold() { holds += 1 }
+    func release() { holds = max(0, holds - 1) }
+
     // A tapped item jumps the queue so its matches appear immediately.
     func prioritize(_ item: MediaItem) async -> VisualDescriptor? {
         await loadCache()
-        if let existing = descriptors[item.id], existing.isCurrent,
+        if let existing = descriptors[item.id] ?? unpublished[item.id], existing.isCurrent,
             existing.sourceModified == item.modified
         {
             return existing
@@ -304,8 +312,8 @@ final class MosaicIndexer {
         guard let descriptor = await MosaicAnalysis.shared.analyze(item, allowFileRead: true) else {
             return nil
         }
-        descriptors[item.id] = descriptor
-        revision += 1
+        unpublished[item.id] = descriptor
+        publish()
         return descriptor
     }
 
@@ -313,6 +321,8 @@ final class MosaicIndexer {
         task?.cancel()
         task = nil
         running = false
+        paused = false
+        publish()
         Task { await MosaicAnalysis.shared.save() }
     }
 
@@ -320,7 +330,15 @@ final class MosaicIndexer {
         stop()
         await MosaicAnalysis.shared.clear()
         descriptors = [:]
+        unpublished = [:]
         attempted = []
+        revision += 1
+    }
+
+    private func publish() {
+        guard !unpublished.isEmpty else { return }
+        descriptors.merge(unpublished) { _, new in new }
+        unpublished = [:]
         revision += 1
     }
 
@@ -328,7 +346,7 @@ final class MosaicIndexer {
         task?.cancel()
         let pending = items.filter { item in
             guard !attempted.contains(item.id) else { return false }
-            guard let existing = descriptors[item.id] else { return true }
+            guard let existing = descriptors[item.id] ?? unpublished[item.id] else { return true }
             return !existing.isCurrent || existing.sourceModified != item.modified
         }
         .sorted { $0.date > $1.date }
@@ -339,67 +357,69 @@ final class MosaicIndexer {
             return
         }
         running = true
-        task = Task { [weak self] in
+        task = Task(priority: .background) { [weak self] in
             await self?.run(pending)
         }
     }
 
     private func run(_ pending: [MediaItem]) async {
         var lastPublish = ContinuousClock.now
-        var sinceSave = 0
+        var lastSave = ContinuousClock.now
         var cursor = 0
         while cursor < pending.count, !Task.isCancelled {
-            let width = Self.concurrency()
-            let batch = Array(pending[cursor..<min(pending.count, cursor + width * 4)])
+            let pace = Self.pace(held: holds > 0)
+            if pace.width == 0 {
+                // Warm device or media on screen: wait without doing any work.
+                paused = true
+                try? await Task.sleep(for: .seconds(3))
+                continue
+            }
+            paused = false
+            let batch = Array(pending[cursor..<min(pending.count, cursor + pace.width)])
             cursor += batch.count
             let results = await withTaskGroup(of: (String, VisualDescriptor?).self) { group in
-                var next = 0
-                var collected: [(String, VisualDescriptor?)] = []
-                func add() {
-                    let item = batch[next]
-                    next += 1
-                    group.addTask(priority: .utility) {
+                for item in batch {
+                    group.addTask(priority: .background) {
                         (item.id, await MosaicAnalysis.compute(item, allowFileRead: false))
                     }
                 }
-                for _ in 0..<min(width, batch.count) { add() }
-                for await result in group {
-                    collected.append(result)
-                    if next < batch.count, !Task.isCancelled { add() }
-                }
+                var collected: [(String, VisualDescriptor?)] = []
+                for await result in group { collected.append(result) }
                 return collected
             }
             guard !Task.isCancelled else { break }
             for (id, descriptor) in results {
                 attempted.insert(id)
                 if let descriptor {
-                    descriptors[id] = descriptor
+                    unpublished[id] = descriptor
                     await MosaicAnalysis.shared.store(descriptor, for: id)
                 }
             }
             remaining = max(0, pending.count - cursor)
-            sinceSave += results.count
-            if sinceSave >= 400 {
-                sinceSave = 0
+            if ContinuousClock.now - lastPublish > .seconds(4) {
+                lastPublish = .now
+                publish()
+            }
+            // Re-encoding the whole cache is costly; checkpoint about once a minute.
+            if ContinuousClock.now - lastSave > .seconds(60) {
+                lastSave = .now
                 await MosaicAnalysis.shared.save()
             }
-            if ContinuousClock.now - lastPublish > .milliseconds(1500) || remaining == 0 {
-                lastPublish = .now
-                revision += 1
-            }
-            if ProcessInfo.processInfo.thermalState == .serious {
-                try? await Task.sleep(for: .milliseconds(400))
-            }
+            if pace.delay > .zero { try? await Task.sleep(for: pace.delay) }
         }
+        publish()
         await MosaicAnalysis.shared.save()
-        revision += 1
+        paused = false
         if !Task.isCancelled { running = false }
     }
 
-    private static func concurrency() -> Int {
+    // Width 0 means pause. Charging allows a little parallelism; battery never does.
+    static func pace(held: Bool) -> (width: Int, delay: Duration) {
         let info = ProcessInfo.processInfo
-        if info.thermalState == .critical { return 1 }
-        if info.isLowPowerModeEnabled || info.thermalState == .serious { return 1 }
-        return min(4, max(2, info.activeProcessorCount / 2))
+        if held || info.thermalState == .serious || info.thermalState == .critical { return (0, .zero) }
+        if info.thermalState == .fair || info.isLowPowerModeEnabled { return (1, .milliseconds(400)) }
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let charging = [.charging, .full].contains(UIDevice.current.batteryState)
+        return charging ? (2, .milliseconds(20)) : (1, .milliseconds(120))
     }
 }

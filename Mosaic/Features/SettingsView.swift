@@ -79,7 +79,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Analyze photos on this iPhone", isOn: $visualAnalysis)
                     if visualAnalysis && MosaicIndexer.shared.running {
-                        LabeledContent("Analyzing") {
+                        LabeledContent(MosaicIndexer.shared.paused ? "Paused to keep iPhone cool" : "Analyzing") {
                             Text(MosaicIndexer.shared.progress.formatted(.percent.precision(.fractionLength(0))))
                                 .monospacedDigit()
                         }
@@ -94,7 +94,7 @@ struct SettingsView: View {
                     Text("Mosaic canvas")
                 } footer: {
                     Text(
-                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs in the background and pauses when Mosaic is closed or your iPhone is hot. Tap any tile on the canvas to explore similar media; pinch or double-tap to zoom."
+                        "Mosaic analyzes small thumbnails entirely on this device to find each item’s colors, scene (like beach, dog, or food), and visual similarity. Nothing is uploaded, iCloud originals are never downloaded for analysis, and cloud-only files are skipped. Indexing runs gently in the background (faster while charging) and pauses while you view media, when Mosaic is closed, or when your iPhone is warm. Tap any tile on the canvas to explore similar media; pinch or double-tap to zoom."
                     )
                 }
                 Section {

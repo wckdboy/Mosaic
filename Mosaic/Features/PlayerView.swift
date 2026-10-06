@@ -25,6 +25,8 @@ struct MediaViewer: View {
     @State private var interaction = 0
     @State private var locked = false
     @State private var isZoomed = false
+    // True while two fingers are pinching, before zoom state settles.
+    @State private var zoomInteracting = false
     @State private var pageOffset: CGFloat = 0
     @State private var dismissOffset = CGSize.zero
     @State private var dragAxis: DragAxis?
@@ -54,7 +56,7 @@ struct MediaViewer: View {
     private var item: MediaItem? { items.indices.contains(index) ? items[index] : nil }
     private var isVideo: Bool { item?.kind == .video }
     private var pagingEnabled: Bool {
-        !locked && !isZoomed && !playback.scrubbing && !playback.boosting && sheet == nil && !closing
+        !locked && !isZoomed && !zoomInteracting && !playback.scrubbing && !playback.boosting && sheet == nil && !closing
     }
 
     init(items: [MediaItem], initialID: String) {
@@ -127,6 +129,13 @@ struct MediaViewer: View {
             guard skipFeedback != nil else { return }
             do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             withAnimation(.easeOut(duration: 0.2)) { skipFeedback = nil }
+        }
+        .task {
+            // Background analysis yields the CPU and Neural Engine while media is on
+            // screen; decoding video and indexing together is what warms a phone.
+            MosaicIndexer.shared.hold()
+            defer { MosaicIndexer.shared.release() }
+            while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         }
         .onDisappear {
             // A presented panel must retain playback, scopes and prepared share files.
@@ -228,22 +237,26 @@ struct MediaViewer: View {
             VideoPlayerSurface(
                 player: player, fill: playback.fill, enabled: !locked,
                 pictureInPicture: pictureInPicture,
+                isZoomed: $isZoomed,
                 onTap: { toggleChrome() },
                 onDoubleTap: { doubleTap($0) },
                 onHold: { holding in
                     if holding { playback.beginBoost() } else { playback.endBoost() }
                 },
-                onPinch: { fill in
-                    withAnimation(.easeInOut(duration: 0.25)) { playback.fill = fill }
-                }
+                onZoomInteraction: { zoomInteraction($0) }
             )
             .opacity(loader.loading ? 0 : 1)
         } else if let photo = loader.livePhoto {
-            LivePhotoSurface(photo: photo).onTapGesture { toggleChrome() }
+            LivePhotoSurface(
+                photo: photo, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) }
+            ) { toggleChrome() }
         } else if let url = loader.animatedURL {
-            AnimatedImageSurface(url: url).contentShape(Rectangle()).onTapGesture { toggleChrome() }
+            AnimatedImageSurface(
+                url: url, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) }, onTap: { toggleChrome() })
         } else if let image = loader.image {
-            ZoomableImage(image: image, isZoomed: $isZoomed) { toggleChrome() }
+            ZoomableImage(image: image, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) }) {
+                toggleChrome()
+            }
         }
     }
 
@@ -273,6 +286,14 @@ struct MediaViewer: View {
             .onEnded { value in
                 let axis = dragAxis
                 dragAxis = nil
+                // A pinch that began as a drag must settle in place, never page or close.
+                guard pagingEnabled else {
+                    withAnimation(snap) {
+                        pageOffset = 0
+                        dismissOffset = .zero
+                    }
+                    return
+                }
                 switch axis {
                 case .horizontal:
                     let travel = value.translation.width
@@ -298,6 +319,15 @@ struct MediaViewer: View {
                 case nil: break
                 }
             }
+    }
+    private func zoomInteraction(_ active: Bool) {
+        zoomInteracting = active
+        guard active, dragAxis != nil else { return }
+        dragAxis = nil
+        withAnimation(snap) {
+            pageOffset = 0
+            dismissOffset = .zero
+        }
     }
     private var snap: Animation? { reduceMotion ? nil : .spring(duration: 0.32, bounce: 0.05) }
     private var backdropOpacity: Double {
@@ -527,6 +557,7 @@ struct MediaViewer: View {
         playback.detach()
         loader.stop()
         isZoomed = false
+        zoomInteracting = false
         skipFeedback = nil
         // Re-base the offset so the incoming page stays under the finger, then settle.
         index += direction

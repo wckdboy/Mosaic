@@ -81,6 +81,45 @@ import XCTest
         app.buttons["Back to Mosaic"].tap()
         XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
     }
+    // A pinch must zoom, never page: once zoomed, a swipe pans the photo instead.
+    func testViewerPinchZoomsPhotoAndBlocksPaging() {
+        launch()
+        app.buttons["media-fixture:0"].tap()
+        let photo = app.descendants(matching: .any)["viewer.zoomable"].firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        photo.pinch(withScale: 3, velocity: 2)
+        app.swipeLeft()
+        XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
+        // Double-tap restores the fitted photo; paging works again.
+        photo.doubleTap()
+        sleep(1)
+        app.swipeLeft()
+        XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_002.jpg")
+    }
+    func testViewerPinchZoomsVideo() {
+        launch(video: true)
+        app.buttons["media-fixture:video"].tap()
+        let video = app.descendants(matching: .any)["viewer.video"].firstMatch
+        XCTAssertTrue(video.waitForExistence(timeout: 10))
+        video.pinch(withScale: 3, velocity: 2)
+        app.swipeLeft()
+        // Still on the video: the swipe panned the zoomed picture instead of paging.
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.video"].firstMatch.exists)
+        XCTAssertTrue(app.buttons["viewer.playPause"].exists || app.descendants(matching: .any)["viewer.video"].exists)
+        capture("Zoomed video")
+    }
+    func testCanvasZoomsOutToEveryItemAndTapDivesIn() {
+        launch()
+        app.buttons["Mosaic view"].tap()
+        XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
+        app.collectionViews["mosaic.canvas"].pinch(withScale: 0.05, velocity: -5)
+        let map = app.descendants(matching: .any)["Overview of all media"]
+        XCTAssertTrue(map.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.cells.count, 0)
+        capture("Whole library map")
+        map.tap()
+        XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
+    }
     func testOrganizationPreviewApplyUndoAndPhysicalExclusion() throws {
         launch()
         app.buttons["library.options"].tap()
