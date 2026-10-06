@@ -139,7 +139,11 @@ final class LibraryStore {
             return result
         }.value
         // Unchanged libraries must not invalidate every view observing items.
-        if refreshed != photos { photos = refreshed }
+        if refreshed != photos {
+            // Edited or deleted assets must not be served from stale cached objects.
+            PhotoAssetCache.removeAll()
+            photos = refreshed
+        }
         isLoading = false
     }
 

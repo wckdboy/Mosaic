@@ -13,6 +13,8 @@ final class CanvasMapView: UIImageView {
         layer.magnificationFilter = .linear
         layer.minificationFilter = .trilinear
         alpha = 0
+        // Always beneath tiles and island labels, whatever order UIKit inserts views in.
+        layer.zPosition = -1
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityLabel = "Overview of all media"
@@ -35,6 +37,8 @@ final class CanvasMapView: UIImageView {
             }
         }
         task = Task { [weak self] in
+            // Debounced: typing a search while zoomed out must not restart the render per keystroke.
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             for await image in CanvasMapRenderer.render(entries, world: world) {
                 guard !Task.isCancelled else { return }
                 self?.image = image
@@ -81,9 +85,12 @@ enum CanvasMapRenderer {
                     context.fill(target(entry.frame))
                 }
                 if let image = context.makeImage() { continuation.yield(UIImage(cgImage: image)) }
-                // Thumbnails are a refinement; skip them when the device is already warm.
-                guard ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
-                else { return }
+                // Thumbnails are a refinement: skip them when tiles are too small to show
+                // one, and whenever the device is warm (re-checked every batch below).
+                func cool() -> Bool {
+                    ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.fair.rawValue
+                }
+                guard MosaicCanvasLayout.unit * k >= 4, cool() else { return }
                 let pixels = max(24, min(160, Int(MosaicCanvasLayout.unit * k * 2)))
                 let options = PHImageRequestOptions()
                 options.isSynchronous = true
@@ -96,7 +103,7 @@ enum CanvasMapRenderer {
                 var lastYield = ContinuousClock.now
                 let photos = entries.filter(\.item.isPhotoLibrary)
                 for start in stride(from: 0, to: photos.count, by: 400) {
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, cool() else { break }
                     let batch = photos[start..<min(photos.count, start + 400)]
                     let fetched = PHAsset.fetchAssets(
                         withLocalIdentifiers: batch.map(\.item.photoIdentifier), options: nil)

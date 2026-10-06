@@ -22,7 +22,8 @@ struct MosaicView: View {
     @State private var clusters: [MosaicCluster] = []
     @State private var tints: [String: UInt32] = [:]
     @State private var revision = UUID()
-    @State private var projecting = false
+    // Starts true so the empty state never flashes before the first projection.
+    @State private var projecting = true
     @State private var viewer: ViewerRoute?
     @State private var command: CanvasCommand?
     // The index revision the canvas currently shows. Newer analysis is offered
@@ -54,7 +55,9 @@ struct MosaicView: View {
             text: textRecognition ? store.recognizedText : [:], applied: shownIndexRevision)
     }
     private var pendingAnalysis: Bool {
-        indexer.revision != shownIndexRevision && indexer.descriptors.count != shownAnalyzedCount
+        // Offer a refresh only for a meaningful batch, not every few new descriptors.
+        indexer.revision != shownIndexRevision
+            && indexer.descriptors.count - shownAnalyzedCount >= max(24, shownAnalyzedCount / 20)
     }
 
     var body: some View {
@@ -192,8 +195,11 @@ struct MosaicView: View {
 
     private func focusSubtitle(_ item: MediaItem) -> String {
         guard let descriptor = indexer.descriptors[item.id] else { return item.name }
-        let label = descriptor.labels?.first.map { MediaTheme.readable($0).capitalized }
-        return [label ?? descriptor.theme, descriptor.color].compactMap { $0 }.joined(separator: " · ")
+        // The fallback theme describes nothing about the photo; show only real labels.
+        guard let label = descriptor.labels?.first.map({ MediaTheme.readable($0).capitalized }) else {
+            return "\(descriptor.color) tones"
+        }
+        return "\(label) · \(descriptor.color)"
     }
 
     private var modeChips: some View {
@@ -215,21 +221,20 @@ struct MosaicView: View {
                 }
             }
         }
-        .scrollClipDisabled()
+        // Clipped so chips scroll under the edge instead of drawing over the count.
+        .mask {
+            LinearGradient(
+                stops: [.init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                startPoint: .leading, endPoint: .trailing)
+        }
     }
 
-    @ViewBuilder private var statusBadge: some View {
-        let count = clusters.reduce(0) { $0 + $1.items.count }
-        HStack(spacing: 6) {
-            if visualAnalysis && indexer.running {
-                ProgressView(value: indexer.progress).progressViewStyle(.circular).controlSize(.mini)
-                    .accessibilityLabel("Analyzing library, \(Int(indexer.progress * 100)) percent")
-            } else if projecting {
-                ProgressView().controlSize(.mini)
-            }
-            Text(count.formatted()).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                .accessibilityLabel("\(count) items")
-        }
+    private var statusBadge: some View {
+        IndexingBadge(
+            count: clusters.reduce(0) { $0 + $1.items.count }, analyzing: visualAnalysis, projecting: projecting
+        )
+        .fixedSize()
+        .layoutPriority(1)
     }
 
     private var filterMenu: some View {
@@ -345,7 +350,8 @@ struct MosaicView: View {
         let visual = indexer.descriptors
         shownAnalyzedCount = visual.count
         projecting = true
-        defer { projecting = false }
+        // A superseded projection must not clear the flag its replacement just set.
+        defer { if !Task.isCancelled { projecting = false } }
         // Debounce keystrokes; grouping work never runs on the main actor.
         do { try await Task.sleep(for: .milliseconds(request.filter.query.isEmpty ? 30 : 160)) } catch {
             return
@@ -374,6 +380,27 @@ struct MosaicView: View {
         clusters = result
         tints = colors
         revision = UUID()
+    }
+}
+
+// Progress changes every item while indexing; reading it in its own view keeps those
+// updates from re-evaluating the whole Mosaic screen.
+private struct IndexingBadge: View {
+    let count: Int
+    let analyzing: Bool
+    let projecting: Bool
+    var body: some View {
+        let indexer = MosaicIndexer.shared
+        HStack(spacing: 6) {
+            if analyzing && indexer.running && !indexer.paused {
+                ProgressView(value: indexer.progress).progressViewStyle(.circular).controlSize(.mini)
+                    .accessibilityLabel("Analyzing library, \(Int(indexer.progress * 100)) percent")
+            } else if projecting {
+                ProgressView().controlSize(.mini)
+            }
+            Text(count.formatted()).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                .accessibilityLabel("\(count) items")
+        }
     }
 }
 

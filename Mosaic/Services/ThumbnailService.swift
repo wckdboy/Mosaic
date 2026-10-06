@@ -95,16 +95,14 @@ private final class VideoThumbnailRequest: @unchecked Sendable {
 }
 
 @MainActor final class PhotoThumbnailRequest {
-    static let manager = PHCachingImageManager()
+    // PHCachingImageManager is thread-safe; prefetching runs off the main actor.
+    nonisolated(unsafe) static let manager = PHCachingImageManager()
     private var request: PHImageRequestID?
     private var generation = UUID()
     func load(_ item: MediaItem, pixels: Int, completion: @escaping (UIImage?) -> Void) {
         cancel()
         let token = generation
-        guard
-            let asset = PHAsset.fetchAssets(withLocalIdentifiers: [item.photoIdentifier], options: nil)
-                .firstObject
-        else {
+        guard let asset = PhotoAssetCache.asset(item.photoIdentifier) else {
             completion(nil)
             return
         }
@@ -119,7 +117,7 @@ private final class VideoThumbnailRequest: @unchecked Sendable {
         }
     }
     // Prefetching must use the same size, mode, and options as load() to hit the cache.
-    static var options: PHImageRequestOptions {
+    nonisolated static var options: PHImageRequestOptions {
         let options = PHImageRequestOptions()
         options.deliveryMode = .opportunistic
         options.resizeMode = .fast
@@ -127,29 +125,66 @@ private final class VideoThumbnailRequest: @unchecked Sendable {
         options.isNetworkAccessAllowed = false
         return options
     }
-    private static func assets(_ items: [MediaItem]) -> [PHAsset] {
-        let ids = items.filter(\.isPhotoLibrary).map(\.photoIdentifier)
-        guard !ids.isEmpty else { return [] }
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-        return result.objects(at: IndexSet(integersIn: 0..<result.count))
-    }
+    // Asset lookups block, so prefetch resolves them off the main actor; the cache
+    // they fill makes the later on-screen load() a dictionary hit.
     static func prefetch(_ items: [MediaItem], pixels: Int) {
-        let assets = assets(items)
-        guard !assets.isEmpty else { return }
-        manager.startCachingImages(
-            for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
-            options: options)
+        let ids = items.filter(\.isPhotoLibrary).map(\.photoIdentifier)
+        guard !ids.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            let assets = PhotoAssetCache.assets(ids)
+            guard !assets.isEmpty else { return }
+            manager.startCachingImages(
+                for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
+                options: options)
+        }
     }
     static func cancelPrefetch(_ items: [MediaItem], pixels: Int) {
-        let assets = assets(items)
-        guard !assets.isEmpty else { return }
-        manager.stopCachingImages(
-            for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
-            options: options)
+        let ids = items.filter(\.isPhotoLibrary).map(\.photoIdentifier)
+        guard !ids.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            let assets = PhotoAssetCache.assets(ids)
+            guard !assets.isEmpty else { return }
+            manager.stopCachingImages(
+                for: assets, targetSize: CGSize(width: pixels, height: pixels), contentMode: .aspectFill,
+                options: options)
+        }
     }
     func cancel() {
         generation = UUID()
         if let request { Self.manager.cancelImageRequest(request) }
         request = nil
     }
+}
+
+// Fetching a PHAsset by identifier blocks on the Photos database. A fling can bring
+// dozens of tiles on screen per frame, so lookups are cached (NSCache is thread-safe).
+enum PhotoAssetCache {
+    nonisolated(unsafe) private static let cache: NSCache<NSString, PHAsset> = {
+        let cache = NSCache<NSString, PHAsset>()
+        cache.countLimit = 8000
+        return cache
+    }()
+    nonisolated static func asset(_ id: String) -> PHAsset? {
+        if let cached = cache.object(forKey: id as NSString) { return cached }
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
+            return nil
+        }
+        cache.setObject(asset, forKey: id as NSString)
+        return asset
+    }
+    nonisolated static func assets(_ ids: [String]) -> [PHAsset] {
+        var result: [PHAsset] = []
+        var missing: [String] = []
+        for id in ids {
+            if let cached = cache.object(forKey: id as NSString) { result.append(cached) } else { missing.append(id) }
+        }
+        if !missing.isEmpty {
+            PHAsset.fetchAssets(withLocalIdentifiers: missing, options: nil).enumerateObjects { asset, _, _ in
+                cache.setObject(asset, forKey: asset.localIdentifier as NSString)
+                result.append(asset)
+            }
+        }
+        return result
+    }
+    nonisolated static func removeAll() { cache.removeAllObjects() }
 }

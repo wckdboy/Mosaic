@@ -158,11 +158,12 @@ struct MosaicCanvas: UIViewRepresentable {
             case .fit:
                 let size = layout.baseSize
                 guard size.width > 0, view.bounds.width > 0 else { return }
-                zoom(view, to: layout.fitScale, anchor: nil, animated: true)
-                center(view, on: CGPoint(x: size.width / 2, y: size.height / 2), animated: !reduceMotion)
+                // One animation that both zooms and centers; two concurrent ones stutter.
+                zoom(
+                    view, to: layout.fitScale, anchor: nil, animated: true,
+                    focus: CGPoint(x: size.width / 2, y: size.height / 2))
             case .recenter:
-                zoom(view, to: 1, anchor: nil, animated: true)
-                center(view, on: layout.focusPoint, animated: !reduceMotion)
+                zoom(view, to: 1, anchor: nil, animated: true, focus: layout.focusPoint, force: true)
             }
         }
 
@@ -210,11 +211,14 @@ struct MosaicCanvas: UIViewRepresentable {
             let inset = UIEdgeInsets(top: y, left: x, bottom: y, right: x)
             if view.contentInset != inset { view.contentInset = inset }
         }
-        private func zoom(_ view: UICollectionView, to value: CGFloat, anchor: CGPoint?, animated: Bool) {
+        private func zoom(
+            _ view: UICollectionView, to value: CGFloat, anchor: CGPoint?, animated: Bool,
+            focus: CGPoint? = nil, force: Bool = false
+        ) {
             guard let layout else { return }
             let next = min(MosaicCanvasLayout.scaleRange.upperBound, max(layout.minimumScale, value))
             let previous = layout.scale
-            guard abs(next - previous) > 0.001 else { return }
+            guard abs(next - previous) > 0.001 || force || focus != nil else { return }
             // The anchor is a point in the viewport that stays under the finger.
             let anchorInView = anchor ?? CGPoint(x: view.bounds.width / 2, y: view.bounds.height / 2)
             let contentPoint = CGPoint(
@@ -226,9 +230,12 @@ struct MosaicCanvas: UIViewRepresentable {
                 view.layoutIfNeeded()
                 self.updateInsets(view)
                 self.updateMap(view)
-                view.contentOffset = self.clamped(
-                    CGPoint(x: contentPoint.x * next - anchorInView.x, y: contentPoint.y * next - anchorInView.y),
-                    in: view)
+                let target =
+                    focus.map {
+                        CGPoint(x: $0.x * next - view.bounds.width / 2, y: $0.y * next - view.bounds.height / 2)
+                    }
+                    ?? CGPoint(x: contentPoint.x * next - anchorInView.x, y: contentPoint.y * next - anchorInView.y)
+                view.contentOffset = self.clamped(target, in: view)
             }
             if animated && !reduceMotion {
                 UIView.animate(
@@ -419,7 +426,10 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     var scale: CGFloat = 1 {
         didSet {
             scale = Self.clampScale(scale)
-            if scale != oldValue { scaled.removeAll(keepingCapacity: true) }
+            if scale != oldValue {
+                scaled.removeAll(keepingCapacity: true)
+                placedScale = -1
+            }
         }
     }
     private(set) var baseSize = CGSize.zero
@@ -427,8 +437,12 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     private var dirty = true
     private var frames: [[CGRect]] = []
     private var headerFrames: [CGRect?] = []
+    private var islandRects: [CGRect?] = []
+    private var labelWidths: [CGFloat] = []
+    // Island labels placed for the current scale; colliding smaller ones are hidden.
+    private var placedLabels: [Int: CGRect] = [:]
+    private var placedScale: CGFloat = -1
     private var buckets: [Int: [IndexPath]] = [:]
-    private var headerBuckets: [Int: [Int]] = [:]
     private var scaled: [IndexPath: UICollectionViewLayoutAttributes] = [:]
     private let bucketSize: CGFloat = 320
 
@@ -455,19 +469,22 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
         guard dirty else { return }
         dirty = false
         scaled.removeAll()
+        placedScale = -1
         buckets.removeAll(keepingCapacity: true)
-        headerBuckets.removeAll(keepingCapacity: true)
+        islandRects = []
         if focused { buildSpiral() } else { buildIslands() }
+        let font = MosaicHeader.font
+        labelWidths = clusters.map { cluster in
+            ceil((MosaicHeader.text(cluster.title, cluster.items.count) as NSString)
+                .size(withAttributes: [.font: font]).width) + 26
+        }
         for (section, sectionFrames) in frames.enumerated() {
             for (item, frame) in sectionFrames.enumerated() {
                 let path = IndexPath(item: item, section: section)
                 forEachBucket(frame) { buckets[$0, default: []].append(path) }
             }
         }
-        for (section, frame) in headerFrames.enumerated() {
-            guard let frame else { continue }
-            forEachBucket(frame) { headerBuckets[$0, default: []].append(section) }
-        }
+
     }
 
     // Each island is a near-square block packed with an occupancy grid: a 2×2 hero
@@ -502,6 +519,7 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
             }
             headerFrames.append(CGRect(x: x, y: y, width: max(width, 160), height: Self.headerSpace - 8))
             let top = y + Self.headerSpace
+            islandRects.append(CGRect(x: x, y: top, width: width, height: height - Self.headerSpace))
             frames.append(
                 block.cells.map { cell in
                     CGRect(
@@ -626,33 +644,27 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
         guard scale > 0 else { return [] }
         let base = CGRect(x: rect.minX / scale, y: rect.minY / scale, width: rect.width / scale, height: rect.height / scale)
-        // Island labels keep a fixed point size, so they may extend beyond their base frame.
-        let headerBase = base.insetBy(dx: -200 / scale, dy: -60 / scale)
-        let minX = max(0, Int(floor(headerBase.minX / bucketSize)))
-        let maxX = max(0, Int(floor(headerBase.maxX / bucketSize)))
-        let minY = max(0, Int(floor(headerBase.minY / bucketSize)))
-        let maxY = max(0, Int(floor(headerBase.maxY / bucketSize)))
         var result: [UICollectionViewLayoutAttributes] = []
-        var seenHeaders = Set<Int>()
-        var seenCells = Set<IndexPath>()
-        for x in minX...maxX {
-            for y in minY...maxY {
-                let key = bucketKey(x, y)
-                // In map mode the whole world may be in view; skip per-item work entirely.
-                if showsCells {
-                    for path in buckets[key] ?? [] where !seenCells.contains(path) {
+        // In map mode the whole world may be in view; skip per-item work entirely.
+        if showsCells {
+            let minX = max(0, Int(floor(base.minX / bucketSize)))
+            let maxX = max(minX, Int(floor(base.maxX / bucketSize)))
+            let minY = max(0, Int(floor(base.minY / bucketSize)))
+            let maxY = max(minY, Int(floor(base.maxY / bucketSize)))
+            var seenCells = Set<IndexPath>()
+            for x in minX...maxX {
+                for y in minY...maxY {
+                    for path in buckets[bucketKey(x, y)] ?? [] where !seenCells.contains(path) {
                         guard let frame = baseFrame(at: path), frame.intersects(base) else { continue }
                         seenCells.insert(path)
                         if let attributes = layoutAttributesForItem(at: path) { result.append(attributes) }
                     }
                 }
-                for section in headerBuckets[key] ?? [] where !seenHeaders.contains(section) {
-                    seenHeaders.insert(section)
-                    if let attributes = headerAttributes(section), attributes.frame.intersects(rect) {
-                        result.append(attributes)
-                    }
-                }
             }
+        }
+        placeLabels()
+        for (section, frame) in placedLabels where frame.intersects(rect) {
+            if let attributes = headerAttributes(section) { result.append(attributes) }
         }
         return result
     }
@@ -665,14 +677,62 @@ final class MosaicCanvasLayout: UICollectionViewLayout {
         scaled[indexPath] = attributes
         return attributes
     }
+    // Labels keep a fixed point size at every zoom. Above an island when its header
+    // space is tall enough, otherwise pinned inside its top-left corner over the
+    // tiles. Larger islands claim space first; a label that would collide with an
+    // accepted one, or that does not fit its island, is hidden until zooming in.
+    private func placeLabels() {
+        guard placedScale != scale else { return }
+        placedScale = scale
+        placedLabels.removeAll(keepingCapacity: true)
+        let order = clusters.indices.sorted {
+            clusters[$0].items.count == clusters[$1].items.count ? $0 < $1 : clusters[$0].items.count > clusters[$1].items.count
+        }
+        let height: CGFloat = 30
+        let cell: CGFloat = 160
+        var grid: [Int: [CGRect]] = [:]
+        func keys(_ rect: CGRect) -> [Int] {
+            var result: [Int] = []
+            for x in Int(floor(rect.minX / cell))...Int(floor(rect.maxX / cell)) {
+                for y in Int(floor(rect.minY / cell))...Int(floor(rect.maxY / cell)) { result.append(bucketKey(x, y)) }
+            }
+            return result
+        }
+        for section in order {
+            guard islandRects.indices.contains(section), let island = islandRects[section],
+                labelWidths.indices.contains(section)
+            else { continue }
+            let tiles = CGRect(
+                x: island.minX * scale, y: island.minY * scale, width: island.width * scale,
+                height: island.height * scale)
+            let width = labelWidths[section]
+            let label: CGRect
+            if Self.headerSpace * scale >= height + 6 {
+                label = CGRect(x: tiles.minX, y: tiles.minY - height - 6, width: width, height: height)
+            } else {
+                // Pinned to the island's corner, drawn over tiles like a map label. It may
+                // extend past a small island; label-to-label collisions still hide it.
+                guard tiles.width >= 16, tiles.height >= 16 else { continue }
+                let inset = min(6, tiles.width * 0.1)
+                label = CGRect(x: tiles.minX + inset, y: tiles.minY + inset, width: width, height: height)
+            }
+            let padded = label.insetBy(dx: -4, dy: -3)
+            let cells = keys(padded)
+            guard !cells.contains(where: { grid[$0]?.contains(where: { $0.intersects(padded) }) ?? false }) else {
+                continue
+            }
+            for key in cells { grid[key, default: []].append(padded) }
+            placedLabels[section] = label
+        }
+    }
     private func headerAttributes(_ section: Int) -> UICollectionViewLayoutAttributes? {
-        guard headerFrames.indices.contains(section), let frame = headerFrames[section] else { return nil }
+        placeLabels()
+        guard let frame = placedLabels[section] else { return nil }
         let attributes = UICollectionViewLayoutAttributes(
             forSupplementaryViewOfKind: Self.headerKind, with: IndexPath(item: 0, section: section))
-        // A fixed-size label pinned just above its island stays legible at any zoom.
-        let tileTop = (frame.minY + Self.headerSpace) * scale
-        attributes.frame = CGRect(x: frame.minX * scale, y: tileTop - 40, width: max(frame.width * scale, 200), height: 34)
-        attributes.zIndex = 10
+        attributes.frame = frame
+        // Labels always draw above tiles and the far-zoom map.
+        attributes.zIndex = 100
         return attributes
     }
     override func layoutAttributesForSupplementaryView(ofKind elementKind: String, at indexPath: IndexPath)
@@ -692,6 +752,7 @@ final class MosaicCanvasCell: UICollectionViewCell {
     private var mediaID: String?
     private(set) var pixels = 0
     private var favorite = false
+    private var hero = false
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.clipsToBounds = true
@@ -716,8 +777,16 @@ final class MosaicCanvasCell: UICollectionViewCell {
         heart.layer.shadowOffset = .zero
         isAccessibilityElement = true
         accessibilityTraits = .button
+        // CGColor borders do not resolve dynamic colors on appearance changes by themselves.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (cell: MosaicCanvasCell, _) in
+            cell.updateBorder()
+        }
     }
     required init?(coder: NSCoder) { fatalError("Storyboard initialization is not supported") }
+    private func updateBorder() {
+        contentView.layer.borderWidth = hero ? 2 : 0
+        contentView.layer.borderColor = UIColor.label.withAlphaComponent(0.8).resolvedColor(with: traitCollection).cgColor
+    }
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = contentView.bounds
@@ -743,8 +812,8 @@ final class MosaicCanvasCell: UICollectionViewCell {
             item.kind == .video
             ? "▶ \(item.duration > 0 ? item.durationLabel : "VIDEO")"
             : item.kind == .animated ? "GIF" : item.kind == .livePhoto ? "LIVE" : ""
-        contentView.layer.borderWidth = hero ? 2 : 0
-        contentView.layer.borderColor = UIColor.label.withAlphaComponent(0.8).cgColor
+        self.hero = hero
+        updateBorder()
         // Same item at the same resolution: keep the current image (favorite toggles).
         guard !sameItem || self.pixels != pixels else {
             setNeedsLayout()
@@ -798,11 +867,15 @@ final class MosaicCanvasCell: UICollectionViewCell {
 
 // Island labels are small glass pills, legible over tiles when zoomed far out.
 final class MosaicHeader: UICollectionReusableView {
-    private let pill = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    static let font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+    static func text(_ title: String, _ count: Int) -> String { "\(title)  \(count.formatted())" }
+    private let pill = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterial))
     private let label = UILabel()
     override init(frame: CGRect) {
         super.init(frame: frame)
-        label.font = .systemFont(ofSize: 15, weight: .semibold)
+        label.font = Self.font
+        label.lineBreakMode = .byTruncatingTail
+        layer.zPosition = 100
         label.adjustsFontForContentSizeCategory = false
         label.textColor = .label
         pill.clipsToBounds = true
@@ -814,16 +887,14 @@ final class MosaicHeader: UICollectionReusableView {
     }
     required init?(coder: NSCoder) { fatalError("Storyboard initialization is not supported") }
     func configure(title: String, count: Int) {
-        label.text = "\(title)  \(count.formatted())"
+        label.text = Self.text(title, count)
         accessibilityLabel = "\(title), \(count) items"
         setNeedsLayout()
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        let size = label.sizeThatFits(CGSize(width: bounds.width - 24, height: bounds.height))
-        let width = min(bounds.width, size.width + 24)
-        pill.frame = CGRect(x: 0, y: (bounds.height - 30) / 2, width: width, height: 30)
-        pill.layer.cornerRadius = 15
+        pill.frame = bounds
+        pill.layer.cornerRadius = bounds.height / 2
         label.frame = pill.bounds.insetBy(dx: 12, dy: 0)
     }
 }

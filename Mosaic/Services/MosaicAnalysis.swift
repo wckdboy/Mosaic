@@ -370,11 +370,11 @@ final class MosaicIndexer {
             let pace = Self.pace(held: holds > 0)
             if pace.width == 0 {
                 // Warm device or media on screen: wait without doing any work.
-                paused = true
+                if !paused { paused = true }
                 try? await Task.sleep(for: .seconds(3))
                 continue
             }
-            paused = false
+            if paused { paused = false }
             let batch = Array(pending[cursor..<min(pending.count, cursor + pace.width)])
             cursor += batch.count
             let results = await withTaskGroup(of: (String, VisualDescriptor?).self) { group in
@@ -395,18 +395,20 @@ final class MosaicIndexer {
                     await MosaicAnalysis.shared.store(descriptor, for: id)
                 }
             }
-            remaining = max(0, pending.count - cursor)
+            // Observed progress updates at the publish cadence, not per item.
             if ContinuousClock.now - lastPublish > .seconds(4) {
                 lastPublish = .now
+                remaining = max(0, pending.count - cursor)
                 publish()
             }
-            // Re-encoding the whole cache is costly; checkpoint about once a minute.
-            if ContinuousClock.now - lastSave > .seconds(60) {
+            // Re-encoding the whole cache is costly; checkpoint every few minutes.
+            if ContinuousClock.now - lastSave > .seconds(300) {
                 lastSave = .now
                 await MosaicAnalysis.shared.save()
             }
             if pace.delay > .zero { try? await Task.sleep(for: pace.delay) }
         }
+        remaining = max(0, pending.count - cursor)
         publish()
         await MosaicAnalysis.shared.save()
         paused = false

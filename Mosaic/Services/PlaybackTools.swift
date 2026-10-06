@@ -95,8 +95,8 @@ final class PlaybackTools {
         statusObservation = nil
         player = nil
         attached = false
-        sleepTask?.cancel()
-        sleepDeadline = nil
+        // The sleep timer outlives paging: it pauses whichever video is playing when
+        // it fires. Closing the viewer cancels it explicitly.
         groupTask?.cancel()
         audioGroup = nil
         subtitleGroup = nil

@@ -143,6 +143,7 @@ struct MediaViewer: View {
             loadedID = nil
             mediaTask?.cancel()
             savePosition()
+            playback.setSleepTimer(minutes: nil)
             playback.detach()
             loader.stop()
         }
@@ -175,14 +176,24 @@ struct MediaViewer: View {
         let stride = size.width + pageGap
         let range = items.isEmpty ? [] : Array(max(0, index - 1)...min(items.count - 1, index + 1))
         return ZStack {
-            ForEach(range, id: \.self) { position in
-                Group {
-                    if position == index { currentPage } else { ViewerPreview(item: items[position]) }
+            // Pages are keyed by item, and every page keeps the same preview view, so a
+            // swipe never swaps a loaded image for a placeholder mid-slide.
+            ForEach(range.map { Page(position: $0, item: items[$0]) }) { page in
+                let current = page.position == index
+                ZStack {
+                    ViewerPreview(item: page.item, pixels: current ? 1100 : 500)
+                        .opacity(current && mediaReady ? 0 : 1)
+                        .onTapGesture { if current { toggleChrome() } }
+                        // Decorative: the media surface above carries the accessible element.
+                        .accessibilityHidden(true)
+                    if current { currentPage }
                 }
                 .frame(width: size.width, height: size.height)
                 .clipped()
-                .offset(x: CGFloat(position - index) * stride + pageOffset)
-                .accessibilityHidden(position != index)
+                .offset(x: CGFloat(page.position - index) * stride + pageOffset)
+                // A container, not an element: only the media surface inside is exposed.
+                .accessibilityElement(children: .contain)
+                .accessibilityHidden(!current)
             }
         }
         .frame(width: size.width, height: size.height)
@@ -201,7 +212,6 @@ struct MediaViewer: View {
     @ViewBuilder private var currentPage: some View {
         if let item {
             ZStack {
-                if !mediaReady { ViewerPreview(item: item).onTapGesture { toggleChrome() } }
                 media(item)
                 if showSpinner && loader.error == nil {
                     ProgressView(
@@ -243,7 +253,8 @@ struct MediaViewer: View {
                 onHold: { holding in
                     if holding { playback.beginBoost() } else { playback.endBoost() }
                 },
-                onZoomInteraction: { zoomInteraction($0) }
+                onZoomInteraction: { zoomInteraction($0) },
+                onFillChange: { playback.fill = $0 }
             )
             .opacity(loader.loading ? 0 : 1)
         } else if let photo = loader.livePhoto {
@@ -555,6 +566,7 @@ struct MediaViewer: View {
         mediaTask?.cancel()
         savePosition()
         playback.detach()
+        playback.fill = false
         loader.stop()
         isZoomed = false
         zoomInteracting = false
@@ -610,7 +622,7 @@ struct MediaViewer: View {
                 if item.kind == .livePhoto { Text("Touch and hold the photo to play its motion and sound.") }
                 if item.kind == .video {
                     Section("Gestures") {
-                        Text("Double-tap the left or right side to skip, hold for 2× speed, pinch to fill.")
+                        Text("Double-tap the left or right side to skip, hold for 2× speed, pinch to zoom.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -622,8 +634,16 @@ struct MediaViewer: View {
 
 // Neighbor pages and the loading state show the grid's cached thumbnail, so a swipe
 // reveals the next item instantly instead of an empty black page.
+private struct Page: Identifiable {
+    let position: Int
+    let item: MediaItem
+    var id: String { item.id }
+}
+
 struct ViewerPreview: View {
     let item: MediaItem
+    // The current page asks for a sharper preview; neighbors stay small.
+    var pixels = 500
     @State private var image: UIImage?
     @State private var request = PhotoThumbnailRequest()
     var body: some View {
@@ -636,11 +656,11 @@ struct ViewerPreview: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .task(id: item.thumbnailKey) {
+        .task(id: "\(item.thumbnailKey)-\(pixels)") {
             if item.isPhotoLibrary {
-                request.load(item, pixels: 400) { if let result = $0 { image = result } }
+                request.load(item, pixels: pixels) { if let result = $0 { image = result } }
             } else {
-                let result = await ThumbnailService.shared.image(for: item, pixels: 400)
+                let result = await ThumbnailService.shared.image(for: item, pixels: pixels)
                 if !Task.isCancelled, let result { image = result }
             }
         }
