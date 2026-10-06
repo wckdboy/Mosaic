@@ -7,17 +7,20 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("visualAnalysis") private var visualAnalysis = true
     @AppStorage("visualCacheVersion") private var visualCacheVersion = 0
+    @AppStorage("detailedDescriptions") private var detailedDescriptions = true
     // Indexing follows library contents, the setting, and foreground state.
     private struct IndexTrigger: Equatable {
         let photos: Int
         let files: Int
         let enabled: Bool
+        let describe: Bool
         let cacheVersion: Int
         let active: Bool
     }
     private var indexTrigger: IndexTrigger {
         IndexTrigger(
             photos: store.photos.count, files: store.archive.files.count, enabled: visualAnalysis,
+            describe: detailedDescriptions,
             cacheVersion: visualCacheVersion, active: scenePhase == .active && store.isReady)
     }
     var body: some View {
@@ -45,7 +48,8 @@ struct ContentView: View {
         }
         .task(id: indexTrigger) {
             let trigger = indexTrigger
-            await MosaicIndexer.shared.update(items: store.items, enabled: trigger.enabled && trigger.active)
+            await MosaicIndexer.shared.update(
+                items: store.items, enabled: trigger.enabled && trigger.active, describe: trigger.describe)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

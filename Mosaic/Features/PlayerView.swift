@@ -364,10 +364,12 @@ struct MediaViewer: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 0)
-                if isVideo && playback.attached && loader.error == nil {
+                // Landscape has little height but easy reach across the middle; portrait
+                // keeps transport in the bottom cluster, within thumb reach.
+                if compactHeight && isVideo && playback.attached && loader.error == nil {
                     VideoTransport(tools: playback, skipInterval: skipInterval) { poke() }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
                 bottomBar
             }
             .background {
@@ -376,7 +378,7 @@ struct MediaViewer: View {
                         .frame(height: 160)
                     Spacer()
                     LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: isVideo ? 260 : 180)
+                        .frame(height: isVideo ? (compactHeight ? 200 : 380) : 180)
                 }
                 .ignoresSafeArea().allowsHitTesting(false)
             }
@@ -464,6 +466,10 @@ struct MediaViewer: View {
     private var bottomBar: some View {
         VStack(spacing: 6) {
             if isVideo && playback.attached && loader.error == nil {
+                if !compactHeight {
+                    VideoTransport(tools: playback, skipInterval: skipInterval) { poke() }
+                        .padding(.bottom, 10)
+                }
                 VideoQuickRow(
                     tools: playback, pictureInPicture: pictureInPicture,
                     onOpenSubtitles: { importingSubtitles = true }, onInteract: { poke() })

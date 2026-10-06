@@ -72,6 +72,8 @@ actor MosaicAnalysis {
         descriptor.labels = vision.labels.map(\.identifier)
         descriptor.theme = MediaTheme.theme(for: vision.labels)
         descriptor.feature = vision.feature
+        descriptor.people = vision.people
+        descriptor.meaning = MediaSemantics.vector(for: vision.labels.flatMap { MediaSemantics.words(MediaTheme.readable($0.identifier)) })
         // Vision can fail transiently (memory pressure) or entirely (simulators). Keep
         // the color result, but leave the entry stale so a later pass retries it.
         if vision.feature == nil { descriptor.version = 1 }
@@ -79,7 +81,30 @@ actor MosaicAnalysis {
         return descriptor
     }
 
-    private static func thumbnail(for item: MediaItem, allowFileRead: Bool) async -> CGImage? {
+    // The precise tier: Apple Intelligence tags merged into an existing descriptor.
+    enum Detail: Sendable {
+        case described(VisualDescriptor)
+        case noImage
+        case modelFailed
+    }
+    @concurrent static func detail(_ item: MediaItem, base: VisualDescriptor, allowFileRead: Bool) async -> Detail {
+        guard !Task.isCancelled, let image = await thumbnail(for: item, allowFileRead: allowFileRead, side: 448)
+        else { return .noImage }
+        guard let description = await MediaDescriber.describe(image) else { return .modelFailed }
+        var descriptor = base
+        descriptor.caption = description.caption
+        descriptor.tags = description.tags
+        descriptor.detailed = true
+        let words =
+            description.tags.flatMap(MediaSemantics.words) + MediaSemantics.words(description.caption)
+            + (base.labels ?? []).flatMap { MediaSemantics.words(MediaTheme.readable($0)) }
+        descriptor.meaning = MediaSemantics.vector(for: words) ?? base.meaning
+        return .described(descriptor)
+    }
+
+    private static func thumbnail(for item: MediaItem, allowFileRead: Bool, side: CGFloat = 256) async
+        -> CGImage?
+    {
         if !item.isPhotoLibrary {
             if let cached = await ThumbnailService.shared.cachedImage(for: item, pixels: 400)?.cgImage {
                 return cached
@@ -97,7 +122,7 @@ actor MosaicAnalysis {
             options.isNetworkAccessAllowed = false
             options.resizeMode = .fast
             PHImageManager.default().requestImage(
-                for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFill,
+                for: asset, targetSize: CGSize(width: side, height: side), contentMode: .aspectFill,
                 options: options
             ) { image, _ in continuation.resume(returning: image) }
         }
@@ -119,19 +144,22 @@ actor MosaicAnalysis {
     // Scene labels and a feature print in one Vision pass. Either may be unavailable
     // (e.g. some simulators); color and hash analysis still succeed without them.
     static func classify(_ image: CGImage) -> (
-        labels: [(identifier: String, confidence: Float)], feature: Data?
+        labels: [(identifier: String, confidence: Float)], feature: Data?, people: Int?
     ) {
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         let classify = VNClassifyImageRequest()
         let print = VNGenerateImageFeaturePrintRequest()
+        let humans = VNDetectHumanRectanglesRequest()
+        humans.upperBodyOnly = false
         try? handler.perform([classify])
         try? handler.perform([print])
+        let people = (try? handler.perform([humans])) != nil ? humans.results?.filter { $0.confidence > 0.5 }.count : nil
         let labels = (classify.results ?? [])
             .filter { $0.confidence >= 0.15 }
             .sorted { $0.confidence > $1.confidence }
             .prefix(10)
             .map { (identifier: $0.identifier, confidence: $0.confidence) }
-        return (Array(labels), print.results?.first.flatMap(quantize))
+        return (Array(labels), print.results?.first.flatMap(quantize), people)
     }
 
     static func quantize(_ observation: VNFeaturePrintObservation) -> Data? {
@@ -277,6 +305,13 @@ final class MosaicIndexer {
     // Results wait here so observers re-render a few times a minute, not per item.
     @ObservationIgnored private var unpublished: [String: VisualDescriptor] = [:]
     @ObservationIgnored private var holds = 0
+    // Precise tier (Apple Intelligence) progress, shown in Settings.
+    private(set) var describing = false
+    private(set) var described = 0
+    private(set) var describable = 0
+    @ObservationIgnored private var describeEnabled = true
+    @ObservationIgnored private var detailAttempted: Set<String> = []
+    @ObservationIgnored private lazy var describerAvailable = MediaDescriber.isAvailable
 
     var progress: Double { total == 0 ? 1 : Double(total - remaining) / Double(total) }
 
@@ -287,9 +322,10 @@ final class MosaicIndexer {
         revision += 1
     }
 
-    func update(items: [MediaItem], enabled: Bool) async {
+    func update(items: [MediaItem], enabled: Bool, describe: Bool = true) async {
         await loadCache()
         self.items = items
+        describeEnabled = describe
         guard enabled else {
             stop()
             return
@@ -314,7 +350,21 @@ final class MosaicIndexer {
         }
         unpublished[item.id] = descriptor
         publish()
+        // The tapped item also gets precise tags right away, without blocking discovery.
+        if descriptor.detailed != true, describeEnabled, describerAvailable {
+            Task { await describeNow(item, base: descriptor, allowFileRead: true) }
+        }
         return descriptor
+    }
+
+    private func describeNow(_ item: MediaItem, base: VisualDescriptor, allowFileRead: Bool) async {
+        detailAttempted.insert(item.id)
+        guard case .described(let detailed) = await MosaicAnalysis.detail(item, base: base, allowFileRead: allowFileRead)
+        else { return }
+        unpublished[item.id] = detailed
+        await MosaicAnalysis.shared.store(detailed, for: item.id)
+        described += 1
+        publish()
     }
 
     func stop() {
@@ -352,13 +402,16 @@ final class MosaicIndexer {
         .sorted { $0.date > $1.date }
         total = pending.count
         remaining = pending.count
-        guard !pending.isEmpty else {
+        let describe = describeEnabled && describerAvailable
+        guard !pending.isEmpty || describe else {
             running = false
             return
         }
         running = true
         task = Task(priority: .background) { [weak self] in
             await self?.run(pending)
+            if describe, !Task.isCancelled { await self?.describeAll() }
+            if !Task.isCancelled { self?.running = false }
         }
     }
 
@@ -388,8 +441,19 @@ final class MosaicIndexer {
                 return collected
             }
             guard !Task.isCancelled else { break }
-            for (id, descriptor) in results {
+            for (id, fresh) in results {
                 attempted.insert(id)
+                // A re-analysis for Vision's sake keeps precise tags for an unchanged item.
+                var descriptor = fresh
+                if var merged = fresh, let old = descriptors[id] ?? unpublished[id], old.detailed == true,
+                    old.sourceModified == merged.sourceModified
+                {
+                    merged.caption = old.caption
+                    merged.tags = old.tags
+                    merged.detailed = true
+                    merged.meaning = old.meaning
+                    descriptor = merged
+                }
                 if let descriptor {
                     unpublished[id] = descriptor
                     await MosaicAnalysis.shared.store(descriptor, for: id)
@@ -412,7 +476,71 @@ final class MosaicIndexer {
         publish()
         await MosaicAnalysis.shared.save()
         paused = false
-        if !Task.isCancelled { running = false }
+    }
+
+    // Precise tagging runs after the fast pass, one item at a time, newest first. It is
+    // the heaviest work Mosaic does, so it pauses on any warmth and goes slowly on battery.
+    private func describeAll() async {
+        let candidates = items.sorted { $0.date > $1.date }.filter { item in
+            guard !detailAttempted.contains(item.id), let descriptor = descriptors[item.id] ?? unpublished[item.id]
+            else { return false }
+            return descriptor.detailed != true
+        }
+        describable = described + candidates.count
+        guard !candidates.isEmpty else { return }
+        describing = true
+        defer { describing = false }
+        var lastPublish = ContinuousClock.now
+        var lastSave = ContinuousClock.now
+        var failures = 0
+        itemLoop: for item in candidates {
+            while !Task.isCancelled {
+                let pace = Self.describePace(held: holds > 0)
+                if pace.go { break }
+                if !paused { paused = true }
+                try? await Task.sleep(for: .seconds(5))
+            }
+            guard !Task.isCancelled else { return }
+            if paused { paused = false }
+            detailAttempted.insert(item.id)
+            guard let base = descriptors[item.id] ?? unpublished[item.id], base.detailed != true else { continue }
+            switch await MosaicAnalysis.detail(item, base: base, allowFileRead: false) {
+            case .described(let detailed):
+                unpublished[item.id] = detailed
+                await MosaicAnalysis.shared.store(detailed, for: item.id)
+                described += 1
+                failures = 0
+            case .noImage:
+                break
+            case .modelFailed:
+                // The model can report available while its assets are still downloading
+                // (or missing, as in Simulator). Stop for this session instead of churning.
+                failures += 1
+                if failures >= 5 {
+                    describerAvailable = false
+                    break itemLoop
+                }
+            }
+            if ContinuousClock.now - lastPublish > .seconds(6) {
+                lastPublish = .now
+                publish()
+            }
+            if ContinuousClock.now - lastSave > .seconds(300) {
+                lastSave = .now
+                await MosaicAnalysis.shared.save()
+            }
+            try? await Task.sleep(for: Self.describePace(held: false).delay)
+        }
+        publish()
+        await MosaicAnalysis.shared.save()
+    }
+
+    static func describePace(held: Bool) -> (go: Bool, delay: Duration) {
+        let info = ProcessInfo.processInfo
+        guard !held, !info.isLowPowerModeEnabled, info.thermalState == .nominal else { return (false, .zero) }
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let charging = [.charging, .full].contains(UIDevice.current.batteryState)
+        return (true, charging ? .milliseconds(200) : .milliseconds(1500))
     }
 
     // Width 0 means pause. Charging allows a little parallelism; battery never does.

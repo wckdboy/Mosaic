@@ -169,10 +169,19 @@ struct MediaBrowser: View {
                 do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
             }
             let result = await Task.detached(priority: .userInitiated) {
-                let filter = MosaicFilter(query: current.query, kind: current.kind)
-                let sorted = current.sort.sorted(
-                    current.items.filter { filter.matches($0, favorites: [], text: current.text, visual: visual) })
-                return (sorted, Self.dayGroups(sorted, sort: current.sort))
+                let kinds = current.items.filter { current.kind == nil || $0.kind == current.kind }
+                let search = MosaicSearch(current.query)
+                guard !search.isEmpty else {
+                    let sorted = current.sort.sorted(kinds)
+                    return (sorted, Self.dayGroups(sorted, sort: current.sort))
+                }
+                // A search lists best matches by relevance, then related media.
+                let ranked = search.rank(kinds, descriptors: visual, text: current.text)
+                let ordered = ranked.matches + ranked.related
+                var groups: [DayGroup] = []
+                if !ranked.matches.isEmpty { groups.append(DayGroup(date: .distantPast, items: ranked.matches)) }
+                if !ranked.related.isEmpty { groups.append(DayGroup(date: .distantFuture, items: ranked.related)) }
+                return (ordered, groups)
             }.value
             if !Task.isCancelled {
                 visibleItems = result.0
@@ -216,9 +225,11 @@ struct MediaBrowser: View {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Text(
-                                    sort == .name
-                                        ? "All media"
-                                        : group.date.formatted(date: .abbreviated, time: .omitted)
+                                    group.date == .distantFuture
+                                        ? "Related"
+                                        : group.date == .distantPast
+                                            ? (query.isEmpty ? "All media" : "Best matches")
+                                            : group.date.formatted(date: .abbreviated, time: .omitted)
                                 )
                                 .font(.subheadline.weight(.semibold))
                                 Spacer()
