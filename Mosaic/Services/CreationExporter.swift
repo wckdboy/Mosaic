@@ -120,7 +120,9 @@ enum CreationExporter {
                     context: context)
             }
             if page.kind == "cover" {
-                drawCoverText(page, size: CGSize(width: pageWidth, height: pageHeight), context: context)
+                drawCoverText(
+                    page, size: CGSize(width: pageWidth, height: pageHeight),
+                    typography: project.coverTypography, context: context)
             } else if !page.title.isEmpty {
                 drawPageCaption(
                     page, size: CGSize(width: pageWidth, height: pageHeight),
@@ -203,8 +205,24 @@ enum CreationExporter {
         _ = pageHeight
     }
 
+    private static func coverFont(_ typography: CoverTypography, size: CGFloat, weight: UIFont.Weight)
+        -> UIFont
+    {
+        let design: UIFontDescriptor.SystemDesign =
+            switch typography {
+            case .serif: .serif
+            case .rounded: .rounded
+            case .sans: .default
+            }
+        let base = UIFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = base.fontDescriptor.withDesign(design) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return base
+    }
+
     private static func drawCoverText(
-        _ page: CoreBookPage, size: CGSize, context: CGContext
+        _ page: CoreBookPage, size: CGSize, typography: CoverTypography, context: CGContext
     ) {
         let margin: CGFloat = 76
         // A soft bottom gradient keeps white type readable over any cover photo.
@@ -223,13 +241,13 @@ enum CreationExporter {
         if !page.title.isEmpty {
             drawText(
                 page.title, at: CGPoint(x: margin, y: margin + 54),
-                font: .systemFont(ofSize: 58, weight: .semibold), color: .white,
+                font: coverFont(typography, size: 58, weight: .semibold), color: .white,
                 maxWidth: size.width - margin * 2, context: context)
         }
         if !page.subtitle.isEmpty {
             drawText(
                 page.subtitle, at: CGPoint(x: margin, y: margin + 20),
-                font: .systemFont(ofSize: 25, weight: .regular),
+                font: coverFont(typography, size: 25, weight: .regular),
                 color: UIColor.white.withAlphaComponent(0.82),
                 maxWidth: size.width - margin * 2, context: context)
         }

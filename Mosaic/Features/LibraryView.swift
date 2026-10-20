@@ -495,7 +495,118 @@ struct MediaBrowser: View {
                 }
             }
             Divider()
+            highlights
         }.padding(.horizontal, 20)
+    }
+
+    // Curated starting points, Cosmos-style: a small set of clusters drawn from the
+    // current library instead of a wall of tiles. Each card is a live view.
+    private var highlights: some View {
+        let favorites = items.filter { store.favorites.contains($0.id) }
+        let videos = items.filter { $0.kind == .video }
+        let live = items.filter { $0.kind == .livePhoto }
+        let onThisDay = onThisDayItems
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                if !onThisDay.isEmpty {
+                    highlightCard("On this day", symbol: "calendar", items: onThisDay)
+                }
+                if !favorites.isEmpty {
+                    highlightCard("Favorites", symbol: "heart", items: favorites)
+                }
+                if !videos.isEmpty {
+                    highlightCard("Videos", symbol: "play.rectangle", items: videos)
+                }
+                if !live.isEmpty {
+                    highlightCard("Live Photos", symbol: "livephoto", items: live)
+                }
+                if !items.isEmpty { smartPicksCard }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 4)
+        }
+        .padding(.horizontal, -20)
+        .accessibilityIdentifier("library.highlights")
+    }
+
+    private var onThisDayItems: [MediaItem] {
+        let calendar = Calendar.current
+        let today = calendar.dateComponents([.month, .day], from: Date())
+        return items.filter { item in
+            let parts = calendar.dateComponents([.month, .day], from: item.date)
+            guard parts.month == today.month, parts.day == today.day else { return false }
+            let year = calendar.component(.year, from: item.date)
+            return year != calendar.component(.year, from: Date())
+        }
+    }
+
+    private func highlightCard(_ title: String, symbol: String, items: [MediaItem]) -> some View {
+        NavigationLink {
+            MediaBrowser(title: title, items: items)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                clusterCover(Array(items.prefix(4)), symbol: symbol)
+                    .frame(width: 148, height: 148)
+                    .clipShape(.rect(cornerRadius: 18))
+                HStack {
+                    Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(items.count.formatted()).font(.caption2).foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .frame(width: 148)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("highlight.\(title)")
+    }
+
+    private var smartPicksCard: some View {
+        Button {
+            smartPicks = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18).fill(MosaicTheme.accent)
+                    VStack(spacing: 8) {
+                        Image(systemName: "wand.and.stars").font(.system(size: 30, weight: .light))
+                        Text("Smart picks").font(.subheadline.weight(.semibold))
+                        Text("A varied, print-ready set").font(.caption2).opacity(0.8)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(10)
+                }
+                .frame(width: 148, height: 148)
+                Text("Smart picks").font(.subheadline.weight(.semibold))
+                    .frame(width: 148, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("highlight.smartPicks")
+    }
+
+    // Cluster-style covers show the first four members as a small mosaic, the way
+    // curated boards read at a glance.
+    @ViewBuilder private func clusterCover(_ items: [MediaItem], symbol: String) -> some View {
+        let grid = Array(items.prefix(4))
+        if grid.isEmpty {
+            Rectangle().fill(.quaternary.opacity(0.6)).overlay {
+                Image(systemName: symbol).font(.system(size: 28, weight: .ultraLight)).foregroundStyle(
+                    .secondary)
+            }
+        } else if grid.count == 1 {
+            MediaThumbnail(item: grid[0], pixels: 420)
+        } else {
+            let columns = grid.count == 3 ? 3 : 2
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columns), spacing: 2
+            ) {
+                ForEach(grid) { item in
+                    MediaThumbnail(item: item, pixels: 360).aspectRatio(1, contentMode: .fill).clipped()
+                }
+            }
+            .aspectRatio(1, contentMode: .fill)
+        }
     }
     private var filters: some View {
         VStack(alignment: .leading, spacing: 8) {

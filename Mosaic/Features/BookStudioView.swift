@@ -211,7 +211,8 @@ struct BookStudioView: View {
                             ForEach(group) { page in
                                 BookPagePreview(
                                     page: page, items: lookup, finish: project.finish,
-                                    pageAspect: project.pageAspect)
+                                    pageAspect: project.pageAspect,
+                                    coverTypography: project.coverTypography)
                             }
                         }
                         .padding(.horizontal, 20)
@@ -241,7 +242,8 @@ struct BookStudioView: View {
                             ForEach(group) { page in
                                 BookPagePreview(
                                     page: page, items: lookup, finish: project.finish,
-                                    pageAspect: project.pageAspect, cornerRadius: 2
+                                    pageAspect: project.pageAspect, cornerRadius: 2,
+                                    coverTypography: project.coverTypography
                                 )
                                 .frame(width: 44)
                             }
@@ -572,6 +574,11 @@ private struct BookOptionsView: View {
                     Picker("Page rhythm", selection: $project.bookStyle) {
                         ForEach(BookStyle.allCases) { style in
                             Text(style.title).tag(style)
+                        }
+                    }
+                    Picker("Cover type", selection: $project.coverTypography) {
+                        ForEach(CoverTypography.allCases) { type in
+                            Text(type.title).tag(type)
                         }
                     }
                     Text(project.bookStyle.explanation)

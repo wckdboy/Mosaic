@@ -124,7 +124,7 @@ struct CollectionsView: View {
                                 MediaBrowser(title: collection.name, items: media, collection: collection)
                             } label: {
                                 HStack(spacing: 16) {
-                                    collectionCover(media, symbol: "rectangle.stack").frame(
+                                    clusterCover(media, symbol: "rectangle.stack").frame(
                                         width: 72, height: 72
                                     ).clipShape(.rect(cornerRadius: 14))
                                     VStack(alignment: .leading, spacing: 4) {
@@ -191,7 +191,7 @@ struct CollectionsView: View {
             MediaBrowser(title: title, items: items)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                collectionCover(items, symbol: symbol).frame(height: 142).clipShape(.rect(cornerRadius: 20))
+                clusterCover(items, symbol: symbol).frame(height: 142).clipShape(.rect(cornerRadius: 20))
                 HStack {
                     Text(title).font(.subheadline.weight(.semibold))
                     Spacer()
@@ -200,18 +200,27 @@ struct CollectionsView: View {
             }
         }.buttonStyle(.plain)
     }
-    @ViewBuilder private func collectionCover(_ items: [MediaItem], symbol: String) -> some View {
-        if let item = items.first {
-            MediaThumbnail(item: item).overlay(alignment: .bottomLeading) {
-                Image(systemName: symbol).font(.title3).foregroundStyle(.white).padding(12).background(
-                    .black.opacity(0.25), in: Circle()
-                ).padding(10)
-            }
-        } else {
+    // Cluster-style covers show the first four members as a small mosaic, the way
+    // curated boards read at a glance.
+    @ViewBuilder private func clusterCover(_ items: [MediaItem], symbol: String) -> some View {
+        let grid = Array(items.prefix(4))
+        if grid.isEmpty {
             Rectangle().fill(.quaternary.opacity(0.6)).overlay {
                 Image(systemName: symbol).font(.system(size: 32, weight: .ultraLight)).foregroundStyle(
                     .secondary)
             }
+        } else if grid.count == 1 {
+            MediaThumbnail(item: grid[0], pixels: 500)
+        } else {
+            let columns = grid.count == 3 ? 3 : 2
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columns), spacing: 2
+            ) {
+                ForEach(grid) { item in
+                    MediaThumbnail(item: item, pixels: 360).aspectRatio(1, contentMode: .fill).clipped()
+                }
+            }
+            .aspectRatio(1, contentMode: .fill)
         }
     }
 }

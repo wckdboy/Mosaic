@@ -26,6 +26,7 @@ These are implemented and documented in the README; the roadmap keeps the *next*
 | S7 | Location-aware chapters | Photos capture locations split chapters by distance; optional reverse geocoding names chapters and is cached locally. |
 | S8 | Story focus | Smart curate uses on-device word meanings to favor photos that fit an idea such as ocean, family, or celebration. |
 | S9 | Saved views | Save a query, media type, favorites/source filter, and sort from the gallery or canvas; the live view appears in Collections and reopens against the current library. |
+| S10 | Curated clusters | The Library opens with live mosaic-covered clusters (On this day, Favorites, Videos, Live Photos, Smart picks); collections use the same four-tile covers. |
 
 ### Next on the create surface
 

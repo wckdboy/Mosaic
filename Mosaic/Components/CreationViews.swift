@@ -87,6 +87,7 @@ struct BookPagePreview: View {
     let finish: CollageFinish
     let pageAspect: Double
     var cornerRadius: CGFloat = 0
+    var coverTypography: CoverTypography = .serif
 
     var body: some View {
         GeometryReader { geometry in
@@ -148,7 +149,13 @@ struct BookPagePreview: View {
             Spacer()
             if !page.title.isEmpty {
                 Text(page.title)
-                    .font(.system(size: max(20, width * 0.075), weight: .semibold, design: .serif))
+                    .font(
+                        coverTypography == .serif
+                            ? .system(size: max(20, width * 0.075), weight: .semibold, design: .serif)
+                            : coverTypography == .rounded
+                                ? .system(size: max(20, width * 0.075), weight: .semibold, design: .rounded)
+                                : .system(size: max(20, width * 0.075), weight: .semibold)
+                    )
                     .foregroundStyle(.white)
                     .lineLimit(3)
             }

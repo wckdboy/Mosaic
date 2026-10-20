@@ -45,6 +45,8 @@ struct CreationProject: Identifiable, Codable, Hashable, Sendable {
     var coverItemID: String?
     var eventTitles: [String: String]?
     var usePlaceNames: Bool?
+    // Optional so projects saved before typography choices still decode.
+    var coverFontRaw: String?
     var createdAt = Date()
     var updatedAt = Date()
 
@@ -75,6 +77,11 @@ struct CreationProject: Identifiable, Codable, Hashable, Sendable {
     var placeNamesEnabled: Bool {
         get { usePlaceNames ?? true }
         set { usePlaceNames = newValue }
+    }
+
+    var coverTypography: CoverTypography {
+        get { CoverTypography(rawValue: coverFontRaw ?? "") ?? .serif }
+        set { coverFontRaw = newValue.rawValue }
     }
 
     var collageStyle: CollageStyle {
@@ -139,6 +146,73 @@ enum CollageStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+// Curated starting points for the collage studio: one tap sets a coherent style,
+// aspect, finish, and caption treatment instead of adjusting four controls.
+enum CollageTemplate: String, CaseIterable, Identifiable, Sendable {
+    case trip, family, anniversary, editorial, minimal, aurora
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .trip: "Trip"
+        case .family: "Family"
+        case .anniversary: "Anniversary"
+        case .editorial: "Editorial"
+        case .minimal: "Minimal"
+        case .aurora: "Aurora"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .trip: "airplane"
+        case .family: "person.2"
+        case .anniversary: "heart"
+        case .editorial: "text.alignleft"
+        case .minimal: "circle.grid.2x2"
+        case .aurora: "sparkles"
+        }
+    }
+    func apply(to project: inout CreationProject) {
+        switch self {
+        case .trip:
+            project.collageStyle = .scatter
+            project.aspect = CollageAspect.print.value
+            project.finish = .sand
+            project.cornerRadius = 6
+            project.showCaptions = true
+        case .family:
+            project.collageStyle = .grid
+            project.aspect = CollageAspect.square.value
+            project.finish = .paper
+            project.cornerRadius = 10
+            project.showCaptions = false
+        case .anniversary:
+            project.collageStyle = .hero
+            project.aspect = CollageAspect.portrait.value
+            project.finish = .white
+            project.cornerRadius = 8
+            project.showCaptions = true
+        case .editorial:
+            project.collageStyle = .magazine
+            project.aspect = CollageAspect.print.value
+            project.finish = .paper
+            project.cornerRadius = 2
+            project.showCaptions = false
+        case .minimal:
+            project.collageStyle = .grid
+            project.aspect = CollageAspect.square.value
+            project.finish = .white
+            project.cornerRadius = 4
+            project.showCaptions = false
+        case .aurora:
+            project.collageStyle = .stack
+            project.aspect = CollageAspect.story.value
+            project.finish = .accent
+            project.cornerRadius = 14
+            project.showCaptions = false
+        }
+    }
+}
+
 enum CollageAspect: String, Codable, CaseIterable, Identifiable, Sendable {
     case square, portrait, story, landscape, print
     var id: String { rawValue }
@@ -186,6 +260,18 @@ enum PageAspect: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     static func nearest(_ value: Double) -> PageAspect {
         allCases.min(by: { abs($0.value - value) < abs($1.value - value) }) ?? .a4Portrait
+    }
+}
+
+enum CoverTypography: String, Codable, CaseIterable, Identifiable, Sendable {
+    case serif, rounded, sans
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .serif: "Serif"
+        case .rounded: "Rounded"
+        case .sans: "Sans"
+        }
     }
 }
 

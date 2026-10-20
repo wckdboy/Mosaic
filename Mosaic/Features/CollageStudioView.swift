@@ -58,6 +58,7 @@ struct CollageStudioView: View {
             ScrollView {
                 VStack(spacing: 22) {
                     preview
+                    templateRow
                     quickControls
                     photoStrip
                     composeControls
@@ -158,6 +159,37 @@ struct CollageStudioView: View {
         .frame(maxHeight: 430)
         .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
         .accessibilityIdentifier("collage.preview")
+    }
+
+    // Curated starting points: one tap sets style, aspect, finish, and captions.
+    private var templateRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Start from a template").font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary).padding(.horizontal, 1)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(CollageTemplate.allCases) { template in
+                        Button {
+                            apply(template)
+                        } label: {
+                            Label(template.title, systemImage: template.symbol)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 13).padding(.vertical, 9)
+                                .foregroundStyle(.primary)
+                                .background(.primary.opacity(0.06), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("collage.template.\(template.rawValue)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func apply(_ template: CollageTemplate) {
+        var updated = project
+        template.apply(to: &updated)
+        project = updated
     }
 
     private var quickControls: some View {

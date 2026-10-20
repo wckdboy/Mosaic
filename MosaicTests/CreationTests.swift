@@ -126,12 +126,27 @@ struct CreationTests {
         object.removeValue(forKey: "coverItemID")
         object.removeValue(forKey: "eventTitles")
         object.removeValue(forKey: "usePlaceNames")
+        object.removeValue(forKey: "coverFontRaw")
         let legacy = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(CreationProject.self, from: legacy)
         #expect(decoded.storyFocus.isEmpty)
         #expect(decoded.coverItemID == nil)
         #expect(decoded.eventTitles == nil)
         #expect(decoded.placeNamesEnabled)
+        #expect(decoded.coverTypography == .serif)
+    }
+
+    @Test func collageTemplatesApplyCoherentSettings() {
+        var project = CreationProject.collage(itemIDs: [])
+        CollageTemplate.trip.apply(to: &project)
+        #expect(project.collageStyle == .scatter)
+        #expect(project.collageAspect == .print)
+        #expect(project.finish == .sand)
+        #expect(project.showCaptions)
+        CollageTemplate.aurora.apply(to: &project)
+        #expect(project.collageStyle == .stack)
+        #expect(project.collageAspect == .story)
+        #expect(project.finish == .accent)
     }
 
     @Test func placeKeysCollapseNearbyCoordinates() {

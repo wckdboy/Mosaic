@@ -374,6 +374,17 @@ import XCTest
         capture("Saved view")
     }
 
+    // The library overview opens with curated clusters; Smart picks is one tap away.
+    func testLibraryHighlightsOpenSmartPicks() {
+        launch()
+        XCTAssertTrue(app.buttons["highlight.smartPicks"].waitForExistence(timeout: 10))
+        app.buttons["highlight.smartPicks"].tap()
+        XCTAssertTrue(app.staticTexts["A book needs a point of view."].waitForExistence(timeout: 10))
+        capture("Highlights → Smart picks")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.buttons["highlight.smartPicks"].waitForExistence(timeout: 5))
+    }
+
     // Selection order matters to Hero, Scatter, Stack, and story-led books. Selecting
     // two items must expose creation actions from the selection bar.
     func testSelectionCanCreateAProject() throws {
