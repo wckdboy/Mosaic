@@ -114,17 +114,25 @@ final class MediaLoader {
             } else {
                 let options = PHImageRequestOptions()
                 options.isNetworkAccessAllowed = true
-                options.deliveryMode = .highQualityFormat
+                // Opportunistic delivery puts a cached frame on screen immediately;
+                // the final high-quality image replaces it without a spinner flash.
+                options.deliveryMode = .opportunistic
+                options.resizeMode = .fast
                 request = PHImageManager.default().requestImage(
-                    for: asset, targetSize: CGSize(width: 3200, height: 3200), contentMode: .aspectFit,
+                    for: asset, targetSize: CGSize(width: 2800, height: 2800), contentMode: .aspectFit,
                     options: options
                 ) { [weak self] image, info in
-                    guard (info?[PHImageResultIsDegradedKey] as? Bool) != true else { return }
+                    let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
                     Task { @MainActor in
                         guard let self, self.generation == token else { return }
-                        self.image = image
-                        self.loading = false
-                        if image == nil {
+                        if let image {
+                            // Do not let a later degraded callback replace the final
+                            // frame; the first degraded frame is only a fast preview.
+                            if !degraded || self.image == nil {
+                                self.image = image
+                                self.loading = false
+                            }
+                        } else if !degraded {
                             self.fail(
                                 "Photo could not be loaded. Check your connection if it is stored in iCloud.")
                         }
@@ -144,7 +152,7 @@ final class MediaLoader {
                     loading = false
                 } else {
                     let image = await Task.detached {
-                        ThumbnailService.downsample(url: access.url, pixels: 4096)
+                        ThumbnailService.downsample(url: access.url, pixels: 3200)
                     }.value
                     guard generation == token else { return }
                     self.image = image

@@ -34,7 +34,7 @@ Screenshots use simulator sample media. No sample media ships with the app.
 - Horizontal or vertical gallery browsing with free momentum scrolling, adjustable density, date grouping, search by filename, format, year, or analyzed content, and sorting.
 - Favorites, named collections, multi-selection, and quick organization actions. Save a search, media type, favorites/source filter, and sort as a **Saved view**; it lives in Collections and reopens against the current library instead of copying media.
 - Selection keeps the order you tap, and the selection bar can start a collage or photobook without leaving the gallery. Collections can be renamed without changing their media.
-- Full-screen viewing with pinch/double-tap zoom, swipe paging and swipe-down to close, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
+- Full-screen viewing with pinch/double-tap zoom, swipe paging and swipe up or down to close, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
 
 ### Mosaic canvas
 
@@ -87,7 +87,7 @@ Video plays edge to edge under one set of floating glass controls that fade afte
 - A large play/pause button between skip back and skip forward, plus a scrubber with buffered range and elapsed/remaining time (tap the time to switch).
 - Double-tap the left or right third to skip; repeated taps accumulate. Press and hold for temporary 2× speed.
 - One-tap speed, subtitle and audio-track selection, Picture in Picture, and mute; loop, lock, and the full playback panel live in the ⋯ menu.
-- The viewer pages horizontally like Photos, following your finger and previewing neighbors from cached thumbnails. Swipe down to close, swipe up for details.
+- The viewer pages horizontally like Photos, following your finger and previewing neighbors from cached thumbnails. Swipe up or down to close; Details stays one tap away in the action bar.
 - Pinch to zoom (up to 8×) and pan photos, GIFs, Live Photos, and videos; double-tap zooms photos. While zoomed, or mid-pinch, swipes pan the media instead of paging or closing. "Fill screen" for video is the zoom that covers the display.
 
 Playback uses AVFoundation with an `AVPlayerLayer`, keeping HDR rendering, AirPlay, and system Picture in Picture where supported by the asset and device.

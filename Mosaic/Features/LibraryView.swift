@@ -56,6 +56,7 @@ struct MediaBrowser: View {
     @State private var selection: [String] = []
     @State private var savingLens = false
     @State private var lensName = ""
+    @Namespace private var viewerTransition
     @State private var viewer: ViewerRoute?
     @State private var organize = false
     @State private var autoOrganize = false
@@ -257,6 +258,7 @@ struct MediaBrowser: View {
         }
         .fullScreenCover(item: $viewer) { route in
             MediaViewer(items: route.items, initialID: route.selectedID)
+                .navigationTransition(.zoom(sourceID: route.selectedID, in: viewerTransition))
         }
         .fullScreenCover(item: $similar) { SimilarMediaView(seed: $0) }
         .fullScreenCover(item: $creation) { project in
@@ -381,6 +383,7 @@ struct MediaBrowser: View {
                                             }
                                         }
                                     }
+                                    .matchedTransitionSource(id: item.id, in: viewerTransition)
                                 }
                             }.padding(.horizontal, 3)
                         }
@@ -452,6 +455,7 @@ struct MediaBrowser: View {
                                             }
                                         }
                                     }
+                                    .matchedTransitionSource(id: item.id, in: viewerTransition)
                             }
                         }.padding(.horizontal, 3)
                     }

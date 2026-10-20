@@ -188,7 +188,7 @@ import XCTest
             XCTAssertTrue(app.buttons["Find similar"].waitForExistence(timeout: 5))
             app.swipeLeft()
             XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_002.jpg")
-            // Alternate the two ways out: the Close button and the swipe-down gesture.
+            // Alternate the two ways out: the Close button and a vertical swipe.
             if iteration.isMultiple(of: 2) {
                 app.buttons["Close"].tap()
             } else {
@@ -198,8 +198,9 @@ import XCTest
         }
         XCTAssertTrue(app.buttons["library.options"].isHittable)
     }
-    // The viewer pages horizontally like Photos; up opens details, down closes.
-    func testViewerSwipesPageShowDetailsAndDismiss() {
+    // The viewer pages horizontally like Photos. Either vertical direction pulls the
+    // picture away and closes; Details stays available from the action bar.
+    func testViewerPagesAndVerticalSwipesDismiss() {
         launch()
         app.buttons["media-fixture:0"].tap()
         XCTAssertTrue(app.buttons["Find similar"].waitForExistence(timeout: 5))
@@ -208,9 +209,14 @@ import XCTest
         app.swipeRight()
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
         app.swipeUp()
+        XCTAssertTrue(app.buttons["library.options"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["viewer.filename"].exists)
+
+        app.buttons["media-fixture:0"].tap()
+        XCTAssertTrue(app.buttons["Find similar"].waitForExistence(timeout: 5))
+        app.buttons["Details"].tap()
         XCTAssertTrue(app.navigationBars["Details"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
-        XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
         app.swipeDown()
         XCTAssertTrue(app.buttons["library.options"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["viewer.filename"].exists)

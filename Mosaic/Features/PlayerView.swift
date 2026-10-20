@@ -1,10 +1,12 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 // The viewer owns one active media load and one transport controller. Neighbors
 // are drawn from cached thumbnails, so paging follows the finger immediately while
 // only the settled page decodes full media or holds an AVPlayer. Chrome floats over
-// full-bleed media and fades away during playback; swipe down closes, up shows details.
+// full-bleed media and fades away during playback; a vertical swipe in either
+// direction pulls the picture away and closes.
 struct MediaViewer: View {
     @Environment(LibraryStore.self) private var store
     @Environment(CreationStore.self) private var creations
@@ -47,7 +49,7 @@ struct MediaViewer: View {
         case info, organize, share, playback
         var id: String { rawValue }
     }
-    private enum DragAxis { case horizontal, down, up }
+    private enum DragAxis { case horizontal, vertical }
     private struct AutoHideKey: Equatable {
         let visible: Bool
         let playing: Bool
@@ -77,8 +79,8 @@ struct MediaViewer: View {
             chrome
             overlays
         }
-        // The clear presentation background reveals the library during a swipe-down,
-        // so assistive technologies must be told the library behind is out of reach.
+        // The clear presentation background reveals the library during a vertical
+        // swipe, so assistive technologies must be told the library behind is out of reach.
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .presentationBackground(.clear)
@@ -186,7 +188,7 @@ struct MediaViewer: View {
             ForEach(range.map { Page(position: $0, item: items[$0]) }) { page in
                 let current = page.position == index
                 ZStack {
-                    ViewerPreview(item: page.item, pixels: current ? 1100 : 500)
+                    ViewerPreview(item: page.item, pixels: current ? 1400 : 700)
                         .opacity(current && mediaReady ? 0 : 1)
                         .onTapGesture { if current { toggleChrome() } }
                         // Decorative: the media surface above carries the accessible element.
@@ -195,6 +197,8 @@ struct MediaViewer: View {
                 }
                 .frame(width: size.width, height: size.height)
                 .clipped()
+                .scaleEffect(current ? 1 : 0.97)
+                .opacity(current ? 1 : 0.72)
                 .offset(x: CGFloat(page.position - index) * stride + pageOffset)
                 // A container, not an element: only the media surface inside is exposed.
                 .accessibilityElement(children: .contain)
@@ -288,16 +292,19 @@ struct MediaViewer: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if dragAxis == nil {
-                    dragAxis = abs(dx) > abs(dy) ? .horizontal : dy > 0 ? .down : .up
-                    if dragAxis == .down { playback.endBoost() }
+                    // Bias toward paging so a casual diagonal swipe does not dismiss.
+                    dragAxis = abs(dx) > abs(dy) * 1.15 ? .horizontal : .vertical
+                    if dragAxis == .vertical { playback.endBoost() }
                 }
                 switch dragAxis {
                 case .horizontal:
                     let atEdge = (index == 0 && dx > 0) || (index == items.count - 1 && dx < 0)
                     pageOffset = atEdge ? dx * 0.3 : dx
-                case .down:
-                    dismissOffset = CGSize(width: dx * 0.6, height: max(0, dy))
-                case .up, nil: break
+                case .vertical:
+                    // Both directions pull the picture away from the library. The small
+                    // horizontal follow keeps the motion under the thumb.
+                    dismissOffset = CGSize(width: dx * 0.4, height: dy)
+                case nil: break
                 }
             }
             .onEnded { value in
@@ -316,22 +323,20 @@ struct MediaViewer: View {
                     let travel = value.translation.width
                     let predicted = value.predictedEndTranslation.width
                     let direction =
-                        travel < -size.width * 0.22 || predicted < -size.width * 0.5
-                        ? 1 : travel > size.width * 0.22 || predicted > size.width * 0.5 ? -1 : 0
+                        travel < -size.width * 0.18 || predicted < -size.width * 0.45
+                        ? 1 : travel > size.width * 0.18 || predicted > size.width * 0.45 ? -1 : 0
                     if direction != 0, items.indices.contains(index + direction) {
                         page(direction, stride: stride)
                     } else {
                         withAnimation(snap) { pageOffset = 0 }
                     }
-                case .down:
-                    if value.translation.height > 110 || value.predictedEndTranslation.height > 320 {
-                        close(height: size.height)
+                case .vertical:
+                    let travel = value.translation.height
+                    let predicted = value.predictedEndTranslation.height
+                    if abs(travel) > 118 || abs(predicted) > 310 {
+                        close(translation: value.translation, size: size)
                     } else {
                         withAnimation(snap) { dismissOffset = .zero }
-                    }
-                case .up:
-                    if value.translation.height < -70 || value.predictedEndTranslation.height < -200 {
-                        sheet = .info
                     }
                 case nil: break
                 }
@@ -348,10 +353,10 @@ struct MediaViewer: View {
     }
     private var snap: Animation? { reduceMotion ? nil : .spring(duration: 0.32, bounce: 0.05) }
     private var backdropOpacity: Double {
-        closing ? 0 : 1 - min(0.85, Double(dismissOffset.height) / 420)
+        closing ? 0 : 1 - min(0.85, abs(Double(dismissOffset.height)) / 420)
     }
     private func dismissScale(_ size: CGSize) -> CGFloat {
-        1 - min(0.25, max(0, dismissOffset.height) / max(1, size.height) * 0.5)
+        1 - min(0.22, abs(dismissOffset.height) / max(1, size.height) * 0.5)
     }
 
     // MARK: Chrome
@@ -422,7 +427,7 @@ struct MediaViewer: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            Button("Close", systemImage: "xmark") { close(height: nil) }
+            Button("Close", systemImage: "xmark") { close() }
                 .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle).controlSize(.large)
             Spacer(minLength: 0)
             moreMenu
@@ -702,21 +707,26 @@ struct MediaViewer: View {
         isZoomed = false
         zoomInteracting = false
         skipFeedback = nil
+        UISelectionFeedbackGenerator().selectionChanged()
         // Re-base the offset so the incoming page stays under the finger, then settle.
         index += direction
         pageOffset += CGFloat(direction) * stride
         withAnimation(snap) { pageOffset = 0 }
     }
-    // Interactive closes finish with a short fade, revealing the library underneath.
-    private func close(height: CGFloat?) {
+    // Interactive closes follow the swipe direction and finish with a short fade,
+    // revealing the library underneath. A notch of haptic feedback marks the commit.
+    private func close(translation: CGSize? = nil, size: CGSize? = nil) {
         guard !closing else { return }
-        guard let height, !reduceMotion else {
+        guard let translation, let size, !reduceMotion else {
             dismiss()
             return
         }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let direction: CGFloat = translation.height < 0 ? -1 : 1
+        let exit = max(size.height * 0.55, abs(translation.height) + 80)
         withAnimation(.easeOut(duration: 0.18)) {
             closing = true
-            dismissOffset.height += height * 0.25
+            dismissOffset = CGSize(width: translation.width, height: direction * exit)
         }
         Task {
             try? await Task.sleep(for: .milliseconds(170))
