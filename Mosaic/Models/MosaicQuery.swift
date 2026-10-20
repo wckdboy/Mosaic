@@ -3,7 +3,7 @@ import Foundation
 // Search and filtering operate on metadata and the local visual index only; they
 // never start media downloads. "beach", "blue", or "dog" match analyzed content.
 struct MosaicFilter: Equatable, Sendable {
-    enum Source: String, CaseIterable, Sendable {
+    enum Source: String, CaseIterable, Codable, Sendable {
         case all = "All sources"
         case photos = "Photos"
         case files = "Files"

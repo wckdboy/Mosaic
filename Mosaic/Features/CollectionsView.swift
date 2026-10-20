@@ -69,7 +69,9 @@ struct CollectionsView: View {
                                 NavigationLink {
                                     MediaBrowser(
                                         title: lens.name, items: store.items,
-                                        query: lens.query, kind: lens.kind, sort: lens.sort)
+                                        query: lens.query, kind: lens.kind,
+                                        favoritesOnly: lens.favoritesOnly, source: lens.source,
+                                        sort: lens.sort)
                                 } label: {
                                     HStack(spacing: 14) {
                                         Image(systemName: "bookmark")

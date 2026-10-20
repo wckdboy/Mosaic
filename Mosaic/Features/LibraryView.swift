@@ -46,6 +46,8 @@ struct MediaBrowser: View {
     @AppStorage("libraryLayout") private var libraryLayout = "gallery"
     @State private var query: String
     @State private var kind: MediaItem.Kind?
+    @State private var favoritesOnly: Bool
+    @State private var source: MosaicFilter.Source
     @State private var sort: MediaSort
     @AppStorage("gridColumns") private var columns = 3
     @AppStorage("galleryDirection") private var galleryDirection = "vertical"
@@ -67,7 +69,7 @@ struct MediaBrowser: View {
     init(
         title: String, items: [MediaItem], showsOverview: Bool = false,
         collection: MediaCollection? = nil, query: String = "", kind: MediaItem.Kind? = nil,
-        sort: MediaSort = .newest
+        favoritesOnly: Bool = false, source: MosaicFilter.Source = .all, sort: MediaSort = .newest
     ) {
         self.title = title
         self.items = items
@@ -75,12 +77,15 @@ struct MediaBrowser: View {
         self.collection = collection
         _query = State(initialValue: query)
         _kind = State(initialValue: kind)
+        _favoritesOnly = State(initialValue: favoritesOnly)
+        _source = State(initialValue: source)
         _sort = State(initialValue: sort)
     }
 
     private var filterKey: FilterKey {
         FilterKey(
-            items: items, query: query, kind: kind, sort: sort,
+            items: items, query: query, kind: kind, favoritesOnly: favoritesOnly,
+            source: source, sort: sort, favorites: favoritesOnly ? store.favorites : [],
             text: textRecognition ? store.recognizedText : [:],
             // Visual labels only matter for a query; avoid refiltering while indexing otherwise.
             index: query.isEmpty ? 0 : MosaicIndexer.shared.revision)
@@ -89,7 +94,10 @@ struct MediaBrowser: View {
         let items: [MediaItem]
         let query: String
         let kind: MediaItem.Kind?
+        let favoritesOnly: Bool
+        let source: MosaicFilter.Source
         let sort: MediaSort
+        let favorites: Set<String>
         let text: [String: String]
         let index: Int
     }
@@ -100,6 +108,8 @@ struct MediaBrowser: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed.capitalized }
         if let kind { return kind.title }
+        if favoritesOnly { return "Favorites" }
+        if source != .all { return source.rawValue }
         return sort == .newest ? "All media" : sort.rawValue
     }
     struct DayGroup: Identifiable, Sendable {
@@ -159,6 +169,12 @@ struct MediaBrowser: View {
                     Picker("Grid", selection: $columns) {
                         ForEach(2...5, id: \.self) { Text("\($0) columns").tag($0) }
                     }
+                    Toggle("Favorites only", systemImage: "heart", isOn: $favoritesOnly)
+                    Picker("Source", selection: $source) {
+                        ForEach(MosaicFilter.Source.allCases, id: \.self) { source in
+                            Text(source.rawValue).tag(source)
+                        }
+                    }
                     Button("Smart picks", systemImage: "wand.and.stars") { smartPicks = true }
                         .disabled(items.isEmpty)
                     Button("Save view", systemImage: "bookmark") {
@@ -211,7 +227,12 @@ struct MediaBrowser: View {
                 do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
             }
             let result = await Task.detached(priority: .userInitiated) {
-                let kinds = current.items.filter { current.kind == nil || $0.kind == current.kind }
+                let kinds = current.items.filter { item in
+                    guard current.kind == nil || item.kind == current.kind else { return false }
+                    guard !current.favoritesOnly || current.favorites.contains(item.id) else { return false }
+                    return current.source == .all
+                        || (current.source == .photos ? item.isPhotoLibrary : !item.isPhotoLibrary)
+                }
                 let search = MosaicSearch(current.query)
                 guard !search.isEmpty else {
                     let sorted = current.sort.sorted(kinds)
@@ -271,13 +292,15 @@ struct MediaBrowser: View {
         .alert("Save view", isPresented: $savingLens) {
             TextField("Name", text: $lensName)
             Button("Save") {
-                store.createLens(name: lensName, query: query, kind: kind, sort: sort)
+                store.createLens(
+                    name: lensName, query: query, kind: kind, favoritesOnly: favoritesOnly,
+                    source: source, sort: sort)
                 lensName = ""
             }
             .disabled(lensName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) { lensName = "" }
         } message: {
-            Text("Saved views reopen this search, media type, and sort from Collections.")
+            Text("Saved views reopen this search, media type, filters, and sort from Collections.")
         }
     }
 
@@ -464,14 +487,43 @@ struct MediaBrowser: View {
         }.padding(.horizontal, 20)
     }
     private var filters: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterButton("All", symbol: nil, value: nil)
-                ForEach(MediaItem.Kind.allCases, id: \.self) { type in
-                    filterButton(type.title, symbol: type.symbol, value: type)
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    filterButton("All", symbol: nil, value: nil)
+                    ForEach(MediaItem.Kind.allCases, id: \.self) { type in
+                        filterButton(type.title, symbol: type.symbol, value: type)
+                    }
+                }.padding(.horizontal, 20)
+            }
+            if favoritesOnly || source != .all {
+                HStack(spacing: 7) {
+                    if favoritesOnly {
+                        activeFilter("Favorites", symbol: "heart.fill") { favoritesOnly = false }
+                    }
+                    if source != .all {
+                        activeFilter(source.rawValue, symbol: "externaldrive") { source = .all }
+                    }
                 }
-            }.padding(.horizontal, 20)
+                .padding(.horizontal, 20)
+            }
         }
+    }
+    private func activeFilter(
+        _ title: String, symbol: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                Text(title)
+                Image(systemName: "xmark").font(.caption2.weight(.bold)).opacity(0.6)
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(.primary.opacity(0.06), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(title) filter")
     }
     private func filterButton(_ name: String, symbol: String?, value: MediaItem.Kind?) -> some View {
         Button {

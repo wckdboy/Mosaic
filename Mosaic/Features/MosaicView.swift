@@ -132,7 +132,8 @@ struct MosaicView: View {
             TextField("Name", text: $lensName)
             Button("Save") {
                 store.createLens(
-                    name: lensName, query: filter.query, kind: filter.kind, sort: .newest)
+                    name: lensName, query: filter.query, kind: filter.kind,
+                    favoritesOnly: filter.favoritesOnly, source: filter.source, sort: .newest)
                 lensName = ""
             }
             .disabled(lensName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

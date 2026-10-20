@@ -25,7 +25,7 @@ These are implemented and documented in the README; the roadmap keeps the *next*
 | S6 | Project shelf | Searchable, filterable shelf for every book and collage with rename, duplicate, kind filters, and deletion. |
 | S7 | Location-aware chapters | Photos capture locations split chapters by distance; optional reverse geocoding names chapters and is cached locally. |
 | S8 | Story focus | Smart curate uses on-device word meanings to favor photos that fit an idea such as ocean, family, or celebration. |
-| S9 | Saved views | Save a query and media type from the gallery or canvas; the live view appears in Collections and reopens against the current library. |
+| S9 | Saved views | Save a query, media type, favorites/source filter, and sort from the gallery or canvas; the live view appears in Collections and reopens against the current library. |
 
 ### Next on the create surface
 

@@ -476,12 +476,15 @@ final class LibraryStore {
         persist()
     }
     @discardableResult
-    func createLens(name: String, query: String, kind: MediaItem.Kind?, sort: MediaSort) -> SavedLens? {
+    func createLens(
+        name: String, query: String, kind: MediaItem.Kind?, favoritesOnly: Bool = false,
+        source: MosaicFilter.Source = .all, sort: MediaSort
+    ) -> SavedLens? {
         let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
         let lens = SavedLens(
             name: cleaned, query: query.trimmingCharacters(in: .whitespacesAndNewlines),
-            kind: kind, sort: sort)
+            kind: kind, favoritesOnly: favoritesOnly, source: source, sort: sort)
         if archive.lenses == nil { archive.lenses = [] }
         archive.lenses?.insert(lens, at: 0)
         persist()

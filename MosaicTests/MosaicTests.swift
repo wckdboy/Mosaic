@@ -71,7 +71,9 @@ struct ArchiveTests {
         let repository = ArchiveRepository(url: folder.appending(path: "library.json"))
         var archive = LibraryArchive()
         archive.lenses = [
-            SavedLens(name: "Blue videos", query: "blue", kind: .video, sort: .oldest)
+            SavedLens(
+                name: "Blue videos", query: "blue", kind: .video, favoritesOnly: true,
+                source: .photos, sort: .oldest)
         ]
         try await repository.save(archive)
         let loaded = try await repository.load()
@@ -79,7 +81,23 @@ struct ArchiveTests {
         #expect(loaded.lenses?.first?.name == "Blue videos")
         #expect(loaded.lenses?.first?.query == "blue")
         #expect(loaded.lenses?.first?.kind == .video)
+        #expect(loaded.lenses?.first?.favoritesOnly == true)
+        #expect(loaded.lenses?.first?.source == .photos)
         #expect(loaded.lenses?.first?.sort == .oldest)
+    }
+    @Test func build16SavedViewsDecodeWithFilterDefaults() throws {
+        let lens = SavedLens(name: "Night", query: "night", kind: .photo)
+        let data = try JSONEncoder().encode(lens)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            Issue.record("Expected a JSON object")
+            return
+        }
+        object.removeValue(forKey: "favoritesOnly")
+        object.removeValue(forKey: "source")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(SavedLens.self, from: legacy)
+        #expect(decoded.favoritesOnly == false)
+        #expect(decoded.source == .all)
     }
     @Test func olderArchivesWithoutSavedViewsDecode() throws {
         let archive = LibraryArchive()
@@ -94,9 +112,13 @@ struct ArchiveTests {
         #expect(decoded.lenses?.isEmpty != false)
     }
     @Test func savedViewSummaryIsReadable() {
-        let lens = SavedLens(name: "Night", query: "night", kind: .photo, sort: .name)
+        let lens = SavedLens(
+            name: "Night", query: "night", kind: .photo, favoritesOnly: true, source: .files,
+            sort: .name)
         #expect(lens.summary.contains("night"))
         #expect(lens.summary.contains("Photos"))
+        #expect(lens.summary.contains("Favorites"))
+        #expect(lens.summary.contains("Files"))
         #expect(lens.summary.contains("Name"))
     }
     @MainActor @Test func renamingACollectionKeepsItsMembers() async throws {
