@@ -134,6 +134,9 @@ struct CoreBookItem: Codable, Sendable {
     var color: String
     var favorite: Bool
     var quality: Double
+    var latitude: Double? = nil
+    var longitude: Double? = nil
+    var place: String? = nil
 }
 
 struct CoreBookRequest: Codable, Sendable {
@@ -148,6 +151,7 @@ struct CoreBookRequest: Codable, Sendable {
     var maxPerPage: Int
     var spacing: Double
     var padding: Double
+    var coverID: String? = nil
 }
 
 struct CoreBookCell: Codable, Sendable, Identifiable {
@@ -185,6 +189,9 @@ struct CoreBookEvent: Codable, Sendable, Identifiable {
     var itemCount: Int
     var pageStart: Int
     var pageCount: Int
+    var place: String? = nil
+    var latitude: Double? = nil
+    var longitude: Double? = nil
     var id: Int { index }
 }
 
@@ -276,6 +283,8 @@ struct CoreSelectRequest: Codable, Sendable {
     var seed: UInt64
     var prefilter: Int?
     var preferRecent: Bool
+    var queryMeaning: String? = nil
+    var queryWeight: Double = 0.4
 }
 
 struct CoreSelection: Codable, Sendable, Identifiable {
@@ -541,15 +550,18 @@ actor MosaicCoreStore {
         items: [MediaItem], descriptors: [String: VisualDescriptor], favorites: Set<String>,
         count: Int, diversity: Double = 0.62, minGapSeconds: Double = 0,
         preferRecent: Bool = true, kinds: [String]? = nil, seed: UInt64 = 1,
-        ids: [String]? = nil
+        ids: [String]? = nil, story: String = ""
     ) async throws -> [CoreSelection] {
         await sync(items: items, descriptors: descriptors, favorites: favorites)
+        let storyVector = MediaSemantics.vector(for: MediaSemantics.words(story))?
+            .base64EncodedString()
         return try await index.select(
             CoreSelectRequest(
                 count: count, ids: ids, excludeIds: [], diversity: diversity,
                 includeFavorites: true, kinds: kinds, minGapSeconds: minGapSeconds,
                 dateFrom: nil, dateTo: nil, seed: seed, prefilter: nil,
-                preferRecent: preferRecent))
+                preferRecent: preferRecent, queryMeaning: storyVector,
+                queryWeight: storyVector == nil ? 0 : 0.4))
     }
 
     func query(

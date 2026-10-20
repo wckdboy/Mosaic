@@ -12,6 +12,7 @@ struct SmartPicksView: View {
     @State private var count = 24
     @State private var diversity = 0.62
     @State private var avoidDuplicates = true
+    @State private var focus = ""
     @State private var selections: [CoreSelection] = []
     @State private var loading = true
     @State private var error: String?
@@ -96,6 +97,8 @@ struct SmartPicksView: View {
                 }
                 Slider(value: $diversity, in: 0...1)
             }
+            TextField("Story focus (optional): ocean, family, celebration", text: $focus)
+                .textFieldStyle(.roundedBorder)
             Toggle("Avoid near-duplicates", isOn: $avoidDuplicates)
             HStack(spacing: 10) {
                 Button("Choose again") { Task { await pick() } }
@@ -195,7 +198,7 @@ struct SmartPicksView: View {
                 count: count, diversity: diversity,
                 minGapSeconds: avoidDuplicates ? 8 : 0,
                 preferRecent: true, seed: UInt64(Date().timeIntervalSince1970),
-                ids: source.map(\.id))
+                ids: source.map(\.id), story: focus)
             selections = rows
         } catch {
             self.error = error.localizedDescription

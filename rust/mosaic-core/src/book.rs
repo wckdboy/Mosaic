@@ -23,6 +23,12 @@ pub struct BookItem {
     pub color: String,
     pub favorite: bool,
     pub quality: f32,
+    /// Optional capture location. Distant captures start a new chapter even when
+    /// the clock says they belong together.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    /// A human-readable place for the chapter, resolved by Swift's on-device cache.
+    pub place: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -42,6 +48,8 @@ pub struct BookRequest {
     pub max_per_page: usize,
     pub spacing: f32,
     pub padding: f32,
+    /// Optional explicit cover photo.
+    pub cover_id: Option<String>,
 }
 
 impl Default for BookRequest {
@@ -58,6 +66,7 @@ impl Default for BookRequest {
             max_per_page: 6,
             spacing: 0.016,
             padding: 0.03,
+            cover_id: None,
         }
     }
 }
@@ -100,6 +109,9 @@ pub struct BookEvent {
     pub item_count: usize,
     pub page_start: usize,
     pub page_count: usize,
+    pub place: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -150,15 +162,21 @@ pub fn plan_book(request: &BookRequest) -> Result<BookPlan, String> {
     let mut events: Vec<BookEvent> = Vec::new();
 
     if request.include_cover && !items.is_empty() {
-        let best = items
-            .iter()
-            .max_by(|left, right| {
-                quality(left)
-                    .partial_cmp(&quality(right))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| right.id.cmp(&left.id))
-            })
-            .expect("items is non-empty");
+        let explicit = request
+            .cover_id
+            .as_deref()
+            .and_then(|id| items.iter().find(|item| item.id == id));
+        let best = explicit.unwrap_or_else(|| {
+            items
+                .iter()
+                .max_by(|left, right| {
+                    quality(left)
+                        .partial_cmp(&quality(right))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| right.id.cmp(&left.id))
+                })
+                .expect("items is non-empty")
+        });
         let rects = page_rects(1, page_aspect, "grid", request.seed, spacing, padding);
         let cells = rects
             .into_iter()
@@ -224,7 +242,11 @@ pub fn plan_book(request: &BookRequest) -> Result<BookPlan, String> {
             pages.push(BookPage {
                 index: pages.len(),
                 kind: "page".into(),
-                title: if cursor == 0 { title.clone() } else { String::new() },
+                title: if cursor == 0 {
+                    title.clone()
+                } else {
+                    String::new()
+                },
                 subtitle: if cursor == 0 {
                     String::new()
                 } else {
@@ -240,6 +262,7 @@ pub fn plan_book(request: &BookRequest) -> Result<BookPlan, String> {
             });
             cursor += size;
         }
+        let (place, latitude, longitude) = event_location(group);
         events.push(BookEvent {
             index: event_index,
             title,
@@ -248,6 +271,9 @@ pub fn plan_book(request: &BookRequest) -> Result<BookPlan, String> {
             item_count: group.len(),
             page_start: first_page,
             page_count: pages.len() - first_page,
+            place,
+            latitude,
+            longitude,
         });
     }
 
@@ -309,10 +335,16 @@ fn group_events(items: &[BookItem]) -> Vec<Vec<BookItem>> {
             .first()
             .map(|first| same_day(first.date, item.date) == false)
             .unwrap_or(false);
+        let location_jump = current
+            .last()
+            .and_then(|previous| distance_between(previous, item))
+            .map(|meters| meters > 45_000.0)
+            .unwrap_or(false);
         let start_new = !current.is_empty()
             && (gap > 20.0 * HOUR
                 || (day_change && current.len() >= 28)
-                || current.len() >= 60);
+                || current.len() >= 60
+                || location_jump);
         if start_new {
             groups.push(std::mem::take(&mut current));
         }
@@ -330,16 +362,36 @@ fn same_day(left: f64, right: f64) -> bool {
 }
 
 fn event_title(group: &[BookItem]) -> String {
-    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let threshold = (group.len() as f32 * 0.45).ceil() as usize;
+
+    // A place is more useful than a generic scene label for a chapter title, but
+    // only when most of the chapter actually happened there.
+    let mut places: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for item in group {
-        if let Some(theme) = item.theme.as_deref() {
-            if !theme.is_empty() && theme != "Everyday" {
-                *counts.entry(theme).or_default() += 1;
+        if let Some(place) = item.place.as_deref() {
+            if !place.is_empty() {
+                *places.entry(place).or_default() += 1;
             }
         }
     }
-    let threshold = (group.len() as f32 * 0.45).ceil() as usize;
-    counts
+    if let Some((place, count)) = places
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+    {
+        if count >= threshold {
+            return place.to_string();
+        }
+    }
+
+    let mut themes: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for item in group {
+        if let Some(theme) = item.theme.as_deref() {
+            if !theme.is_empty() && theme != "Everyday" {
+                *themes.entry(theme).or_default() += 1;
+            }
+        }
+    }
+    themes
         .into_iter()
         .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
         .filter(|(_, count)| *count >= threshold)
@@ -347,13 +399,59 @@ fn event_title(group: &[BookItem]) -> String {
         .unwrap_or_default()
 }
 
+fn event_location(group: &[BookItem]) -> (Option<String>, Option<f64>, Option<f64>) {
+    let mut places: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut latitude = 0.0;
+    let mut longitude = 0.0;
+    let mut located = 0usize;
+    for item in group {
+        if let Some(place) = item.place.as_deref() {
+            if !place.is_empty() {
+                *places.entry(place).or_default() += 1;
+            }
+        }
+        if let (Some(lat), Some(lon)) = (item.latitude, item.longitude) {
+            if lat.is_finite() && lon.is_finite() {
+                latitude += lat;
+                longitude += lon;
+                located += 1;
+            }
+        }
+    }
+    let place = places
+        .into_iter()
+        .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(place, _)| place.to_string());
+    if located > 0 {
+        (
+            place,
+            Some(latitude / located as f64),
+            Some(longitude / located as f64),
+        )
+    } else {
+        (place, None, None)
+    }
+}
+
+/// Great-circle distance in metres. Equirectangular is accurate enough at the
+/// chapter scale and avoids trigonometry in the common case.
+fn distance_between(left: &BookItem, right: &BookItem) -> Option<f64> {
+    let (lat1, lon1) = (left.latitude?, left.longitude?);
+    let (lat2, lon2) = (right.latitude?, right.longitude?);
+    if !lat1.is_finite() || !lon1.is_finite() || !lat2.is_finite() || !lon2.is_finite() {
+        return None;
+    }
+    let mean_latitude = ((lat1 + lat2) / 2.0).to_radians();
+    let dx = (lon2 - lon1) * mean_latitude.cos() * 111_320.0;
+    let dy = (lat2 - lat1) * 110_540.0;
+    Some((dx * dx + dy * dy).sqrt())
+}
+
 fn quality(item: &BookItem) -> f32 {
     let megapixels = (item.width as f32 * item.height as f32) / 1_000_000.0;
     let resolution = (megapixels.max(0.1).log10() / 1.3).clamp(0.0, 1.0);
-    (item.quality * 0.6
-        + resolution * 0.25
-        + if item.favorite { 0.15 } else { 0.0 })
-    .clamp(0.0, 1.0)
+    (item.quality * 0.6 + resolution * 0.25 + if item.favorite { 0.15 } else { 0.0 })
+        .clamp(0.0, 1.0)
 }
 
 fn rhythm_size(style: &str, index: usize, event_index: usize) -> usize {
@@ -471,6 +569,9 @@ mod tests {
                 color: "Green".into(),
                 favorite: index % 8 == 0,
                 quality: 0.6,
+                latitude: None,
+                longitude: None,
+                place: None,
             })
             .collect();
         BookRequest {
@@ -534,6 +635,14 @@ mod tests {
     }
 
     #[test]
+    fn explicit_cover_overrides_quality() {
+        let mut request = request(5, false);
+        request.cover_id = Some("p3".into());
+        let plan = plan_book(&request).unwrap();
+        assert_eq!(plan.pages[0].cells[0].id, "p3");
+    }
+
+    #[test]
     fn empty_library_is_valid() {
         let plan = plan_book(&BookRequest::default()).unwrap();
         assert_eq!(plan.page_count, 0);
@@ -554,6 +663,9 @@ mod tests {
                 color: "Blue".into(),
                 favorite: false,
                 quality: 0.5,
+                latitude: None,
+                longitude: None,
+                place: None,
             })
             .collect();
         let plan = plan_book(&request).unwrap();

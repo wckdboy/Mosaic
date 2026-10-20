@@ -152,7 +152,9 @@ final class LibraryStore {
                             id: id, name: name, kind: kind,
                             date: asset.creationDate ?? .distantPast, duration: asset.duration,
                             width: asset.pixelWidth, height: asset.pixelHeight,
-                            modified: asset.modificationDate))
+                            modified: asset.modificationDate,
+                            latitude: asset.location?.coordinate.latitude,
+                            longitude: asset.location?.coordinate.longitude))
                     if batch.count >= 1_000 {
                         continuation.yield(batch)
                         batch.removeAll(keepingCapacity: true)
@@ -206,11 +208,13 @@ final class LibraryStore {
                         failures.append(url.lastPathComponent)
                         continue
                     }
+                    let location = MediaLocation.coordinates(for: url)
                     files.append(
                         MediaItem(
                             id: "file:\(url.standardizedFileURL.path)", name: url.lastPathComponent,
-                            kind: kind, date: values.creationDate ?? Date(), bookmark: bookmark, fileURL: url,
-                            modified: values.contentModificationDate))
+                            kind: kind, date: values.creationDate ?? Date(), bookmark: bookmark,
+                            fileURL: url, modified: values.contentModificationDate,
+                            latitude: location?.latitude, longitude: location?.longitude))
                 } catch { failures.append("\(url.lastPathComponent): \(error.localizedDescription)") }
             }
             return (files, failures)

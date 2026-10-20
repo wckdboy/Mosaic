@@ -105,7 +105,8 @@ import XCTest
         app.swipeLeft()
         // Still on the video: the swipe panned the zoomed picture instead of paging.
         XCTAssertTrue(app.descendants(matching: .any)["viewer.video"].firstMatch.exists)
-        XCTAssertTrue(app.buttons["viewer.playPause"].exists || app.descendants(matching: .any)["viewer.video"].exists)
+        XCTAssertTrue(
+            app.buttons["viewer.playPause"].exists || app.descendants(matching: .any)["viewer.video"].exists)
         capture("Zoomed video")
     }
     func testCanvasZoomsOutToEveryItemAndTapDivesIn() {
@@ -307,17 +308,87 @@ import XCTest
         }
     }
 
+    // Adding while browsing is a first-class workflow: target a book, swipe, add.
+    func testCollectPhotosIntoSpecificBookWhileSwiping() throws {
+        launch()
+        app.buttons["media-fixture:0"].tap()
+        XCTAssertTrue(app.buttons["viewer.collect"].waitForExistence(timeout: 5))
+        app.buttons["viewer.collect"].tap()
+        XCTAssertTrue(app.buttons["New photobook"].waitForExistence(timeout: 5))
+        app.buttons["New photobook"].tap()
+        let add = app.buttons["collect.add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+        app.swipeLeft()
+        XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_002.jpg")
+        XCTAssertTrue(app.buttons["collect.add"].waitForExistence(timeout: 5))
+        app.buttons["collect.add"].tap()
+        capture("Collecting into a book")
+        app.buttons["viewer.collect"].tap()
+        app.buttons["Stop collecting"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
+        app.buttons["Close"].tap()
+        app.tabBars.buttons["Create"].tap()
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label BEGINSWITH 'Photobook'")
+            ).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Projects"].waitForExistence(timeout: 5))
+    }
+
+    func testProjectShelfCreatesRenamesAndDuplicates() throws {
+        launch()
+        app.tabBars.buttons["Create"].tap()
+        XCTAssertTrue(app.buttons["create.projects"].waitForExistence(timeout: 10))
+        app.buttons["create.projects"].tap()
+        XCTAssertTrue(app.buttons["projects.new"].waitForExistence(timeout: 5))
+        app.buttons["projects.new"].tap()
+        XCTAssertTrue(app.buttons["New collage"].waitForExistence(timeout: 5))
+        app.buttons["New collage"].tap()
+        XCTAssertTrue(app.buttons["collage.share"].waitForExistence(timeout: 10))
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.buttons["projects.menu"].firstMatch.waitForExistence(timeout: 10))
+        app.buttons["projects.menu"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Rename"].waitForExistence(timeout: 5))
+        app.buttons["Rename"].tap()
+        let field = app.alerts.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+        field.typeText("Trip")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Trip"].waitForExistence(timeout: 5))
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.buttons["create.projects"].waitForExistence(timeout: 5))
+    }
+
+    func testCreateSurvivesDarkMode() throws {
+        launch(appearance: "dark")
+        app.tabBars.buttons["Create"].tap()
+        XCTAssertTrue(app.buttons["create.collage"].waitForExistence(timeout: 10))
+        capture("Create dark")
+        app.buttons["create.collage"].tap()
+        XCTAssertTrue(app.buttons["collage.share"].waitForExistence(timeout: 10))
+        let share = app.buttons["collage.share"]
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: share)
+        waitForExpectations(timeout: 20)
+        capture("Collage dark")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["create.photobook"].waitForExistence(timeout: 5))
+        app.buttons["create.photobook"].tap()
+        XCTAssertTrue(app.buttons["book.curate"].waitForExistence(timeout: 10))
+        capture("Photobook dark")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["create.collage"].waitForExistence(timeout: 5))
+    }
+
     // Create must stay reachable without leaving the library, and each studio must
     // produce a usable layout from the first launch without a Photos grant.
     func testCreateCollagePhotobookAndSmartPicks() throws {
         launch()
-        let createTab = app.tabBars.buttons["Create"]
-        print("CREATE-TAB frame=\(createTab.frame) hittable=\(createTab.isHittable)")
-        createTab.tap()
-        sleep(5)
-        print("CREATE-HIERARCHY\n\(app.debugDescription)")
-        capture("Create after tap")
-        XCTAssertTrue(app.staticTexts["Your photos, composed."].waitForExistence(timeout: 10))
+        app.tabBars.buttons["Create"].tap()
+        XCTAssertTrue(app.staticTexts["Your photos, composed."].waitForExistence(timeout: 15))
         capture("Create launchpad")
 
         app.buttons["create.collage"].tap()
@@ -334,7 +405,9 @@ import XCTest
         let curate = app.buttons["book.curate"]
         expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: curate)
         waitForExpectations(timeout: 20)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'pages'")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'pages'")).firstMatch
+                .waitForExistence(timeout: 15))
         capture("Photobook studio")
         app.buttons["Done"].tap()
 

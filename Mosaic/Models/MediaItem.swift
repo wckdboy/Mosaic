@@ -36,6 +36,11 @@ struct MediaItem: Identifiable, Codable, Hashable, Sendable {
     var folderID: UUID?
     var relativePath: String?
     var modified: Date?
+    // Optional capture location. Photos supplies it directly; Files falls back to
+    // EXIF GPS when available. It is only used to group a photobook into coherent
+    // places, never to build a map or identify anyone.
+    var latitude: Double? = nil
+    var longitude: Double? = nil
     var thumbnailKey: String { "\(id)-\(modified?.timeIntervalSince1970 ?? 0)" }
     var isPhotoLibrary: Bool { id.hasPrefix("photos:") }
     var photoIdentifier: String { String(id.dropFirst(7)) }

@@ -92,10 +92,7 @@ impl StoredItem {
         } else {
             default_quality(&meta)
         };
-        let bands = feature
-            .as_deref()
-            .map(band_keys)
-            .unwrap_or([0; LSH_BANDS]);
+        let bands = feature.as_deref().map(band_keys).unwrap_or([0; LSH_BANDS]);
         // Drop the base64 payloads; keeping them would double memory for 50k items.
         meta.feature = None;
         meta.meaning = None;
@@ -368,7 +365,11 @@ impl MosaicIndex {
             count,
             analyzed,
             semantic,
-            average_quality: if count == 0 { 0.0 } else { quality / count as f32 },
+            average_quality: if count == 0 {
+                0.0
+            } else {
+                quality / count as f32
+            },
             oldest: dates.first().copied(),
             newest: dates.last().copied(),
             feature_dimension: FEATURE_DIM,
@@ -497,25 +498,29 @@ impl MosaicIndex {
             items.retain(|(_, item)| requested.contains(item.meta.id.as_str()));
         }
         match request.mode {
-            ClusterMode::Color => Ok(cluster_by(&items, |item| {
-                if item.meta.color.is_empty() {
-                    "Not analyzed".to_string()
-                } else {
-                    item.meta.color.clone()
-                }
-            }, Some(color_rank))),
-            ClusterMode::Theme => Ok(cluster_by(&items, |item| {
-                item.meta
-                    .theme
-                    .clone()
-                    .filter(|theme| !theme.is_empty())
-                    .unwrap_or_else(|| "Not analyzed".into())
-            }, None)),
-            ClusterMode::Name => Ok(cluster_by(
+            ClusterMode::Color => Ok(cluster_by(
                 &items,
-                |item| name_group(&item.meta.name),
+                |item| {
+                    if item.meta.color.is_empty() {
+                        "Not analyzed".to_string()
+                    } else {
+                        item.meta.color.clone()
+                    }
+                },
+                Some(color_rank),
+            )),
+            ClusterMode::Theme => Ok(cluster_by(
+                &items,
+                |item| {
+                    item.meta
+                        .theme
+                        .clone()
+                        .filter(|theme| !theme.is_empty())
+                        .unwrap_or_else(|| "Not analyzed".into())
+                },
                 None,
             )),
+            ClusterMode::Name => Ok(cluster_by(&items, |item| name_group(&item.meta.name), None)),
             ClusterMode::Similar => Ok(similar_clusters(&items, request.budget, request.threshold)),
         }
     }
@@ -568,6 +573,11 @@ impl MosaicIndex {
         }
         let (oldest, newest) = date_bounds(&candidates);
         let span = (newest - oldest).max(1.0);
+        let query_meaning = request
+            .query_meaning
+            .as_deref()
+            .and_then(decode_feature)
+            .and_then(|meaning| project(&meaning, MEANING_DIM, PROJECTION_SEED ^ 0xA5A5_5A5A));
         let mut rng = Rng::new(request.seed);
         // A light deterministic shuffle breaks ties between equally good photos
         // (common in bursts) without making the result noisy.
@@ -584,7 +594,21 @@ impl MosaicIndex {
                 0.0
             };
             let label_bonus = (item.meta.labels.len() as f32 / 10.0).clamp(0.0, 0.12);
-            (item.quality * 0.58 + recency as f32 * recency_weight + favorite + label_bonus).clamp(0.0, 1.2)
+            let semantic_bonus = query_meaning
+                .as_deref()
+                .and_then(|query| {
+                    item.meaning
+                        .as_deref()
+                        .map(|meaning| dot(query, meaning).max(0.0))
+                })
+                .unwrap_or(0.0)
+                * request.query_weight.clamp(0.0, 1.0);
+            (item.quality * 0.58
+                + recency as f32 * recency_weight
+                + favorite
+                + label_bonus
+                + semantic_bonus)
+                .clamp(0.0, 1.2)
         };
         let prefilter = request
             .prefilter
@@ -717,7 +741,8 @@ impl MosaicIndex {
                 parent[right] = left;
             }
         }
-        let mut buckets: HashMap<u16, Vec<usize>> = HashMap::with_capacity(data.positions.len() / 4);
+        let mut buckets: HashMap<u16, Vec<usize>> =
+            HashMap::with_capacity(data.positions.len() / 4);
         let mut best: HashMap<(usize, usize), f32> = HashMap::new();
         let mut matches = 0usize;
         for (index, item) in data.active() {
@@ -842,7 +867,11 @@ fn color_rank(color: &str) -> usize {
         .unwrap_or(ORDER.len())
 }
 
-fn cluster_by<F>(items: &[(usize, &StoredItem)], key: F, rank: Option<fn(&str) -> usize>) -> Vec<Cluster>
+fn cluster_by<F>(
+    items: &[(usize, &StoredItem)],
+    key: F,
+    rank: Option<fn(&str) -> usize>,
+) -> Vec<Cluster>
 where
     F: Fn(&StoredItem) -> String,
 {
@@ -864,7 +893,10 @@ where
             Cluster {
                 id: title.clone(),
                 title,
-                item_ids: members.into_iter().map(|item| item.meta.id.clone()).collect(),
+                item_ids: members
+                    .into_iter()
+                    .map(|item| item.meta.id.clone())
+                    .collect(),
             }
         })
         .collect();
@@ -905,9 +937,9 @@ fn name_group(id: &str) -> String {
             }
         })
         .collect();
-    let first = cleaned.split_whitespace().find(|word| {
-        !word.chars().all(|character| character.is_ascii_digit())
-    });
+    let first = cleaned
+        .split_whitespace()
+        .find(|word| !word.chars().all(|character| character.is_ascii_digit()));
     first
         .map(|word| {
             let mut chars = word.chars();
@@ -952,9 +984,7 @@ fn similar_clusters(items: &[(usize, &StoredItem)], budget: usize, threshold: f3
         for leader_index in candidates {
             let leader = leaders[leader_index];
             let similarity = visual_similarity(item, leader);
-            if similarity >= threshold
-                && best.is_none_or(|(_, current)| similarity > current)
-            {
+            if similarity >= threshold && best.is_none_or(|(_, current)| similarity > current) {
                 best = Some((leader_index, similarity));
             }
         }
@@ -965,7 +995,10 @@ fn similar_clusters(items: &[(usize, &StoredItem)], budget: usize, threshold: f3
             leaders.push(item);
             groups.push(vec![item]);
             for band in 0..LSH_BANDS {
-                buckets.entry(item.bands[band]).or_default().push(leader_index);
+                buckets
+                    .entry(item.bands[band])
+                    .or_default()
+                    .push(leader_index);
             }
         } else {
             other.push(item);
@@ -986,7 +1019,10 @@ fn similar_clusters(items: &[(usize, &StoredItem)], budget: usize, threshold: f3
             Cluster {
                 id: format!("group-{index}"),
                 title: cluster_title(&members),
-                item_ids: members.into_iter().map(|item| item.meta.id.clone()).collect(),
+                item_ids: members
+                    .into_iter()
+                    .map(|item| item.meta.id.clone())
+                    .collect(),
             }
         })
         .collect();
@@ -1198,6 +1234,10 @@ pub struct SelectRequest {
     pub seed: u64,
     pub prefilter: Option<usize>,
     pub prefer_recent: bool,
+    /// Optional semantic query (base64 Int8 word vector) used to favor a story
+    /// focus such as "ocean", "family", or "celebration".
+    pub query_meaning: Option<String>,
+    pub query_weight: f32,
 }
 
 impl Default for SelectRequest {
@@ -1215,6 +1255,8 @@ impl Default for SelectRequest {
             seed: 1,
             prefilter: None,
             prefer_recent: true,
+            query_meaning: None,
+            query_weight: 0.4,
         }
     }
 }
@@ -1346,8 +1388,84 @@ mod tests {
             .unwrap();
         assert_eq!(selected.len(), 8);
         assert!(selected.iter().any(|selection| selection.id == "p4"));
-        let unique: HashSet<_> = selected.iter().map(|selection| selection.id.clone()).collect();
+        let unique: HashSet<_> = selected
+            .iter()
+            .map(|selection| selection.id.clone())
+            .collect();
         assert_eq!(unique.len(), 8);
+    }
+
+    #[test]
+    fn semantic_query_favors_a_story_focus() {
+        let index = MosaicIndex::new();
+        let positive: Vec<i8> = (0..512)
+            .map(|value| if value % 2 == 0 { 120 } else { -40 })
+            .collect();
+        let negative: Vec<i8> = positive.iter().map(|value| -*value).collect();
+        let positive_encoded = base64::engine::general_purpose::STANDARD.encode(
+            positive
+                .iter()
+                .map(|value| *value as u8)
+                .collect::<Vec<_>>(),
+        );
+        let negative_encoded = base64::engine::general_purpose::STANDARD.encode(
+            negative
+                .iter()
+                .map(|value| *value as u8)
+                .collect::<Vec<_>>(),
+        );
+        let mut first = item("summer", &positive, 1_000.0, 0.5);
+        first.meaning = Some(positive_encoded.clone());
+        first.feature = None;
+        let mut second = item("winter", &negative, 1_000.0, 0.5);
+        second.meaning = Some(negative_encoded);
+        second.feature = None;
+        index.upsert(vec![first, second]).unwrap();
+        let selected = index
+            .select(&SelectRequest {
+                count: 1,
+                diversity: 0.0,
+                query_meaning: Some(positive_encoded),
+                query_weight: 1.0,
+                min_gap_seconds: 0.0,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "summer");
+    }
+
+    #[test]
+    fn location_jump_splits_a_book_chapter() {
+        // Two captures an hour apart but a hundred kilometres away should not share
+        // one chapter, even though the clock alone would join them.
+        let items = vec![
+            super::tests::book_item("home", 1_700_000_000.0, 55.67, 12.56),
+            super::tests::book_item("away", 1_700_003_600.0, 56.16, 10.20),
+        ];
+        let plan = crate::book::plan_book(&crate::book::BookRequest {
+            items,
+            include_cover: false,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(plan.events.len(), 2);
+    }
+
+    fn book_item(id: &str, date: f64, latitude: f64, longitude: f64) -> crate::book::BookItem {
+        crate::book::BookItem {
+            id: id.into(),
+            date,
+            width: 4032,
+            height: 3024,
+            theme: None,
+            color: "Blue".into(),
+            favorite: false,
+            quality: 0.6,
+            latitude: Some(latitude),
+            longitude: Some(longitude),
+            place: None,
+        }
     }
 
     #[test]

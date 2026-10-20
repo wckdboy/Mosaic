@@ -9,6 +9,7 @@ struct CreateView: View {
     @State private var collage: CreationProject?
     @State private var book: CreationProject?
     @State private var smartPicks = false
+    @State private var projectsOpen = false
 
     var body: some View {
         NavigationStack {
@@ -24,7 +25,17 @@ struct CreateView: View {
             }
             .mosaicBackground()
             .navigationTitle("Create")
-            .onAppear { print("MOSAIC_CREATE_APPEARED") }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Projects", systemImage: "square.stack.3d.up") {
+                        projectsOpen = true
+                    }
+                    .accessibilityIdentifier("create.projects")
+                }
+            }
+            .fullScreenCover(isPresented: $projectsOpen) {
+                CreationLibraryView()
+            }
             .fullScreenCover(item: $collage) { project in
                 CollageStudioView(project: project)
             }
@@ -35,8 +46,12 @@ struct CreateView: View {
                 SmartPicksView(source: store.items) { kind, items in
                     let project =
                         kind == .collage
-                        ? CreationProject.collage(itemIDs: items.map(\.id))
-                        : CreationProject.photobook(itemIDs: items.map(\.id))
+                        ? CreationProject.collage(
+                            itemIDs: items.map(\.id),
+                            title: CreationProject.suggestedTitle(.collage))
+                        : CreationProject.photobook(
+                            itemIDs: items.map(\.id),
+                            title: CreationProject.suggestedTitle(.photobook))
                     if kind == .collage { collage = project } else { book = project }
                 }
             }
@@ -65,14 +80,16 @@ struct CreateView: View {
                     symbol: "square.on.square.dashed", tint: Color(hex: 0xA64BD1),
                     identifier: "create.collage"
                 ) {
-                    collage = .collage(itemIDs: [])
+                    collage = .collage(
+                        itemIDs: [], title: CreationProject.suggestedTitle(.collage))
                 }
                 makeCard(
                     title: "Photobook", subtitle: "A story in pages",
                     symbol: "book.closed", tint: Color(hex: 0xE07A2E),
                     identifier: "create.photobook"
                 ) {
-                    book = .photobook(itemIDs: [])
+                    book = .photobook(
+                        itemIDs: [], title: CreationProject.suggestedTitle(.photobook))
                 }
             }
             Button {
@@ -140,6 +157,8 @@ struct CreateView: View {
                     Text("Recent").font(.title3.weight(.semibold))
                     Spacer()
                     Text("\(creations.projects.count)").font(.caption).foregroundStyle(.secondary)
+                    Button("All projects") { projectsOpen = true }
+                        .font(.caption.weight(.semibold))
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {

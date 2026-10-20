@@ -39,8 +39,18 @@ struct CreationProject: Identifiable, Codable, Hashable, Sendable {
     var pageAspect: Double = PageAspect.a4Portrait.value
     var maxPerPage = 4
     var includeCover = true
+    // Optional so projects saved before these fields still decode. The accessors
+    // below supply the defaults used by the studio.
+    var story: String?
+    var coverItemID: String?
+    var eventTitles: [String: String]?
+    var usePlaceNames: Bool?
     var createdAt = Date()
     var updatedAt = Date()
+
+    static func suggestedTitle(_ kind: Kind) -> String {
+        "\(kind.title) · \(Date.now.formatted(.dateTime.month(.abbreviated).day()))"
+    }
 
     static func collage(itemIDs: [String], title: String = "Untitled collage") -> CreationProject {
         CreationProject(
@@ -55,6 +65,16 @@ struct CreationProject: Identifiable, Codable, Hashable, Sendable {
             style: BookStyle.editorial.rawValue, aspect: 1.0, seed: 1,
             spacing: 0.016, padding: 0.03, finish: .paper, cornerRadius: 0,
             spread: true, pageAspect: PageAspect.a4Portrait.value, maxPerPage: 4, includeCover: true)
+    }
+
+    var storyFocus: String {
+        get { story ?? "" }
+        set { story = newValue }
+    }
+
+    var placeNamesEnabled: Bool {
+        get { usePlaceNames ?? true }
+        set { usePlaceNames = newValue }
     }
 
     var collageStyle: CollageStyle {
@@ -246,6 +266,25 @@ final class CreationStore {
         projects.sort { $0.updatedAt > $1.updatedAt }
         persist()
         return saved
+    }
+
+    @discardableResult
+    func add(_ itemIDs: [String], to projectID: UUID) -> CreationProject? {
+        guard var project = project(id: projectID) else { return nil }
+        var known = Set(project.itemIDs)
+        for id in itemIDs where known.insert(id).inserted {
+            // A book's order is its story order, so appended items go at the end
+            // until the person explicitly reorders them.
+            project.itemIDs.append(id)
+        }
+        return save(project)
+    }
+
+    func rename(_ project: CreationProject, to title: String) {
+        var updated = project
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.title = cleaned.isEmpty ? project.kind.title : cleaned
+        save(updated)
     }
 
     func delete(_ project: CreationProject) {

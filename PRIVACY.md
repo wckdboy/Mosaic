@@ -10,6 +10,8 @@ The metadata archive uses iOS file protection until the first device unlock afte
 
 Original media remain where they are unless you explicitly confirm a batch in Auto organize’s Original files mode. Photos-library originals are never moved. Viewing can create thumbnails and temporary representations. Original media exported for sharing and S3 images downloaded for viewing use temporary storage, cleaned up when the viewer closes. Unexpected termination can leave temporary files until iOS or a later maintenance pass removes them.
 
+Creations (collages and photobooks) are saved as small local recipes: media identifiers, style, layout seed, title, chapter names, and finish. They do not duplicate the original photos. Exported collage images and photobook PDFs are written to temporary storage only when you choose Share, and are handed to the system share sheet.
+
 Disconnecting a folder or forgetting a file removes its active reference from Mosaic, not the original. Collection/favorite identifiers may remain for disconnected or temporarily inaccessible sources. Clearing the text index removes recognized text; clearing the visual cache removes color/composition analysis.
 
 ## Permissions and discovery
@@ -17,6 +19,8 @@ Disconnecting a folder or forgetting a file removes its active reference from Mo
 Photos access may include all assets or a user-selected subset. Files and folders are accessed only after a system picker grant. iOS prevents scanning other apps’ private storage or unselected directories. Connected folder trees are scanned recursively on launch, foreground entry, or refresh.
 
 ## Network activity
+
+Place names are optional. When **Name chapters by place** is on, Mosaic may send a rounded coordinate (roughly a kilometre) to Apple’s reverse geocoder to name a photobook chapter or the Place row in Details. Photos and other media are never sent. Results are cached locally, and the setting can be turned off; the book still groups by location on device without a network lookup.
 
 Opening cloud-only Photos media can download it through Apple. A Files provider may fetch metadata or media from its service while listing a folder, generating a thumbnail, or opening a selected item. Its own authentication and privacy policies apply.
 
@@ -26,9 +30,15 @@ S3 listing and image transfers use ephemeral network sessions without persistent
 
 S3 credentials are stored in Keychain with device-only accessibility after first unlock. They do not sync through iCloud Keychain. Disconnecting deletes the saved credentials. Nextcloud, Proton Drive, Google Drive, and iCloud provider credentials stay under their respective apps’ control.
 
+## Location
+
+If Photos or a file’s EXIF metadata includes capture coordinates, Mosaic keeps them with the local media reference. They are used only to group a photobook into coherent places, to draw an optional chapter title, and to show the Place/Coordinates rows in Details. They are not used for advertising, profiling, face identification, or a map. Reverse geocoding is the only optional network use of a coordinate, described above.
+
 ## On-device analysis
 
 Text recognition uses Apple Vision after an explicit Settings action. Visual analysis (color palette, Apple Vision scene labels, and a Vision feature print used for similarity) runs on-device from small local thumbnails, never downloads iCloud originals or cloud-only files, and can be turned off or cleared in Settings. With Apple Intelligence available and Detailed descriptions on, Apple’s on-device Foundation Model additionally writes a short caption and search tags from a small thumbnail; requests use the on-device model only. People are described generically by appearance (for example "woman" or "group"); Mosaic does not identify people, store faces, or guess names, ages, or health. Neither sends content to an external AI service. Sentiment uses filenames and optionally recognized text, not an inference about people in photos.
+
+The Rust engine (similarity search, duplicate grouping, curation, collage and photobook geometry) runs entirely in the app process. It receives compact local descriptors and returns identifiers and geometry; it has no network access.
 
 ## Sharing
 

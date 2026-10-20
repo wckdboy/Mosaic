@@ -184,8 +184,12 @@ struct MediaBrowser: View {
                 let ranked = search.rank(kinds, descriptors: visual, text: current.text)
                 let ordered = ranked.matches + ranked.related
                 var groups: [DayGroup] = []
-                if !ranked.matches.isEmpty { groups.append(DayGroup(date: .distantPast, items: ranked.matches)) }
-                if !ranked.related.isEmpty { groups.append(DayGroup(date: .distantFuture, items: ranked.related)) }
+                if !ranked.matches.isEmpty {
+                    groups.append(DayGroup(date: .distantPast, items: ranked.matches))
+                }
+                if !ranked.related.isEmpty {
+                    groups.append(DayGroup(date: .distantFuture, items: ranked.related))
+                }
                 return (ordered, groups)
             }.value
             if !Task.isCancelled {
@@ -208,8 +212,12 @@ struct MediaBrowser: View {
             SmartPicksView(source: items) { kind, picked in
                 creation =
                     kind == .collage
-                    ? .collage(itemIDs: picked.map(\.id))
-                    : .photobook(itemIDs: picked.map(\.id))
+                    ? .collage(
+                        itemIDs: picked.map(\.id),
+                        title: CreationProject.suggestedTitle(.collage))
+                    : .photobook(
+                        itemIDs: picked.map(\.id),
+                        title: CreationProject.suggestedTitle(.photobook))
             }
         }
         .fullScreenCover(isPresented: $autoOrganize) {
@@ -287,10 +295,14 @@ struct MediaBrowser: View {
                                             organize = true
                                         }
                                         Button("Make a collage", systemImage: "square.on.square.dashed") {
-                                            creation = .collage(itemIDs: selection.isEmpty ? [item.id] : Array(selection))
+                                            creation = .collage(
+                                                itemIDs: selection.isEmpty ? [item.id] : Array(selection),
+                                                title: CreationProject.suggestedTitle(.collage))
                                         }
                                         Button("Make a photobook", systemImage: "book.closed") {
-                                            creation = .photobook(itemIDs: selection.isEmpty ? [item.id] : Array(selection))
+                                            creation = .photobook(
+                                                itemIDs: selection.isEmpty ? [item.id] : Array(selection),
+                                                title: CreationProject.suggestedTitle(.photobook))
                                         }
                                         if let collection {
                                             Button("Remove from collection", systemImage: "minus.circle") {
@@ -409,7 +421,10 @@ struct MediaBrowser: View {
     }
     private func openCreation(_ kind: CreationProject.Kind) {
         let ids = selection.isEmpty ? visibleItems.map(\.id) : Array(selection)
-        creation = kind == .collage ? .collage(itemIDs: ids) : .photobook(itemIDs: ids)
+        creation =
+            kind == .collage
+            ? .collage(itemIDs: ids, title: CreationProject.suggestedTitle(.collage))
+            : .photobook(itemIDs: ids, title: CreationProject.suggestedTitle(.photobook))
     }
 
     private func open(_ item: MediaItem) {

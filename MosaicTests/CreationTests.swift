@@ -112,6 +112,36 @@ struct CreationTests {
         #expect(abs(decoded.aspect - CollageAspect.portrait.value) < 0.001)
     }
 
+    @Test func olderProjectsDecodeWithNewDefaults() throws {
+        var project = CreationProject.photobook(itemIDs: ["a", "b"])
+        project.storyFocus = "ocean"
+        project.coverItemID = "a"
+        project.eventTitles = ["0": "The coast"]
+        let data = try JSONEncoder().encode(project)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            Issue.record("Expected a JSON object")
+            return
+        }
+        object.removeValue(forKey: "story")
+        object.removeValue(forKey: "coverItemID")
+        object.removeValue(forKey: "eventTitles")
+        object.removeValue(forKey: "usePlaceNames")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(CreationProject.self, from: legacy)
+        #expect(decoded.storyFocus.isEmpty)
+        #expect(decoded.coverItemID == nil)
+        #expect(decoded.eventTitles == nil)
+        #expect(decoded.placeNamesEnabled)
+    }
+
+    @Test func placeKeysCollapseNearbyCoordinates() {
+        let first = PlaceNameService.key(latitude: 55.6761, longitude: 12.5683)
+        let second = PlaceNameService.key(latitude: 55.6799, longitude: 12.5711)
+        let distant = PlaceNameService.key(latitude: 55.70, longitude: 12.60)
+        #expect(first == second)
+        #expect(first != distant)
+    }
+
     @Test func collageExporterProducesAPrintSizedImage() async throws {
         let media = try items(4)
         var project = CreationProject.collage(itemIDs: media.map(\.id))

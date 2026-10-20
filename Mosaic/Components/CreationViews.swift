@@ -118,6 +118,24 @@ struct BookPagePreview: View {
                 }
                 if page.kind == "cover" {
                     coverType(width: width, height: height)
+                } else if !page.title.isEmpty {
+                    VStack {
+                        Spacer()
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(page.title).font(.caption2.weight(.semibold)).lineLimit(1)
+                            Spacer()
+                            if let date = page.startDate {
+                                Text(
+                                    Date(timeIntervalSince1970: date).formatted(
+                                        date: .abbreviated, time: .omitted)
+                                )
+                                .font(.caption2).lineLimit(1)
+                            }
+                        }
+                        .foregroundStyle(finish.foregroundIsLight ? .white : .primary.opacity(0.7))
+                        .padding(.horizontal, max(12, width * 0.06))
+                        .padding(.bottom, max(10, width * 0.04))
+                    }
                 }
             }
             .clipped()

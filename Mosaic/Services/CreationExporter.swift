@@ -121,6 +121,10 @@ enum CreationExporter {
             }
             if page.kind == "cover" {
                 drawCoverText(page, size: CGSize(width: pageWidth, height: pageHeight), context: context)
+            } else if !page.title.isEmpty {
+                drawPageCaption(
+                    page, size: CGSize(width: pageWidth, height: pageHeight),
+                    finish: project.finish, context: context)
             }
             context.endPDFPage()
         }
@@ -228,6 +232,21 @@ enum CreationExporter {
                 font: .systemFont(ofSize: 25, weight: .regular),
                 color: UIColor.white.withAlphaComponent(0.82),
                 maxWidth: size.width - margin * 2, context: context)
+        }
+    }
+
+    private static func drawPageCaption(
+        _ page: CoreBookPage, size: CGSize, finish: CollageFinish, context: CGContext
+    ) {
+        let color: UIColor = finish.foregroundIsLight ? .white : UIColor.black.withAlphaComponent(0.65)
+        drawText(
+            page.title, at: CGPoint(x: 48, y: 30), font: .systemFont(ofSize: 15, weight: .medium),
+            color: color, maxWidth: size.width * 0.6, context: context)
+        if let date = page.startDate {
+            drawText(
+                Date(timeIntervalSince1970: date).formatted(date: .abbreviated, time: .omitted),
+                at: CGPoint(x: size.width - 180, y: 30), font: .systemFont(ofSize: 13),
+                color: color.withAlphaComponent(0.75), maxWidth: 140, context: context)
         }
     }
 

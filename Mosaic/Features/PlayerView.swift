@@ -7,6 +7,7 @@ import SwiftUI
 // full-bleed media and fades away during playback; swipe down closes, up shows details.
 struct MediaViewer: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(CreationStore.self) private var creations
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,6 +37,8 @@ struct MediaViewer: View {
     @State private var showSpinner = false
     @State private var sheet: Sheet?
     @State private var similarSeed: MediaItem?
+    @State private var collectTarget: UUID?
+    @State private var collectFeedback = false
     @State private var importingSubtitles = false
     @AppStorage("skipInterval") private var skipInterval = 10
     @AppStorage("autoplay") private var autoplay = true
@@ -56,7 +59,8 @@ struct MediaViewer: View {
     private var item: MediaItem? { items.indices.contains(index) ? items[index] : nil }
     private var isVideo: Bool { item?.kind == .video }
     private var pagingEnabled: Bool {
-        !locked && !isZoomed && !zoomInteracting && !playback.scrubbing && !playback.boosting && sheet == nil && !closing
+        !locked && !isZoomed && !zoomInteracting && !playback.scrubbing && !playback.boosting && sheet == nil
+            && !closing
     }
 
     init(items: [MediaItem], initialID: String) {
@@ -164,6 +168,7 @@ struct MediaViewer: View {
             }
         }
         .fullScreenCover(item: $similarSeed) { SimilarMediaView(seed: $0) }
+        .sensoryFeedback(.success, trigger: collectFeedback) { _, new in new }
         .fileImporter(isPresented: $importingSubtitles, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result { Task { await playback.loadSubtitles(from: url) } }
         }
@@ -263,7 +268,8 @@ struct MediaViewer: View {
             ) { toggleChrome() }
         } else if let url = loader.animatedURL {
             AnimatedImageSurface(
-                url: url, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) }, onTap: { toggleChrome() })
+                url: url, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) },
+                onTap: { toggleChrome() })
         } else if let image = loader.image {
             ZoomableImage(image: image, isZoomed: $isZoomed, onInteraction: { zoomInteraction($0) }) {
                 toggleChrome()
@@ -374,11 +380,15 @@ struct MediaViewer: View {
             }
             .background {
                 VStack {
-                    LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 160)
+                    LinearGradient(
+                        colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 160)
                     Spacer()
-                    LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: isVideo ? (compactHeight ? 200 : 380) : 180)
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: isVideo ? (compactHeight ? 200 : 380) : 180)
                 }
                 .ignoresSafeArea().allowsHitTesting(false)
             }
@@ -446,6 +456,11 @@ struct MediaViewer: View {
                 Button("Details", systemImage: "info.circle") { sheet = .info }
             }
             Button("Add to collection", systemImage: "rectangle.stack.badge.plus") { sheet = .organize }
+            Menu {
+                collectChoices
+            } label: {
+                Label("Add to project", systemImage: "rectangle.stack.badge.plus")
+            }
             if isVideo && playback.attached {
                 Section {
                     Toggle("Repeat", systemImage: "repeat", isOn: $loader.loop)
@@ -476,6 +491,7 @@ struct MediaViewer: View {
                 VideoScrubber(tools: playback, skipInterval: skipInterval) { poke() }
                     .padding(.bottom, compactHeight ? 0 : 8)
             }
+            if collectTarget != nil { collectBar }
             if !compactHeight { actionBar }
         }
         .padding(.horizontal, 18).padding(.bottom, compactHeight ? 2 : 6)
@@ -494,6 +510,8 @@ struct MediaViewer: View {
             Spacer()
             Button("Find similar", systemImage: "square.on.square") { findSimilar() }
             Spacer()
+            collectMenu
+            Spacer()
             Button("Details", systemImage: "info.circle") { sheet = .info }
         }
         .labelStyle(.iconOnly).font(.title3).buttonStyle(MediaControlButtonStyle()).foregroundStyle(.white)
@@ -504,6 +522,113 @@ struct MediaViewer: View {
                 Text(shareError).font(.caption).foregroundStyle(.white.opacity(0.8)).offset(y: -22)
             }
         }
+    }
+
+    private var collectMenu: some View {
+        Menu {
+            collectChoices
+        } label: {
+            Image(systemName: "rectangle.stack.badge.plus")
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("Add to project")
+        .accessibilityIdentifier("viewer.collect")
+    }
+
+    @ViewBuilder private var collectChoices: some View {
+        let books = creations.projects.filter { $0.kind == .photobook }
+        let collages = creations.projects.filter { $0.kind == .collage }
+        // Creation and stop live at the top: a long project list must never push the
+        // action that starts a new book below the menu fold.
+        Section {
+            Button("New photobook", systemImage: "book.closed") { createCollectProject(.photobook) }
+            Button("New collage", systemImage: "square.on.square.dashed") { createCollectProject(.collage) }
+            if collectTarget != nil {
+                Button("Stop collecting", systemImage: "xmark.circle") { collectTarget = nil }
+            }
+        }
+        if !books.isEmpty {
+            Section("Photobooks") {
+                ForEach(books) { project in
+                    Button {
+                        collectTarget = project.id
+                    } label: {
+                        Label(
+                            "\(project.title) · \(project.itemIDs.count)",
+                            systemImage: collectTarget == project.id
+                                ? "checkmark" : "book.closed")
+                    }
+                }
+            }
+        }
+        if !collages.isEmpty {
+            Section("Collages") {
+                ForEach(collages) { project in
+                    Button {
+                        collectTarget = project.id
+                    } label: {
+                        Label(
+                            "\(project.title) · \(project.itemIDs.count)",
+                            systemImage: collectTarget == project.id
+                                ? "checkmark" : "square.on.square.dashed")
+                    }
+                }
+            }
+        }
+    }
+
+    private func createCollectProject(_ kind: CreationProject.Kind) {
+        guard let item else { return }
+        let project =
+            kind == .photobook
+            ? CreationProject.photobook(
+                itemIDs: [item.id], title: CreationProject.suggestedTitle(.photobook))
+            : CreationProject.collage(
+                itemIDs: [item.id], title: CreationProject.suggestedTitle(.collage))
+        collectTarget = creations.save(project).id
+        collectFeedback.toggle()
+    }
+
+    private var collectBar: some View {
+        Group {
+            if let target = collectTarget, let project = creations.project(id: target), let item {
+                HStack(spacing: 10) {
+                    Image(systemName: project.kind.symbol)
+                        .font(.subheadline).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(project.title).font(.caption.weight(.semibold)).lineLimit(1)
+                        Text("\(project.itemIDs.count) items")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.65))
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        addCurrent(to: project)
+                    } label: {
+                        Label(
+                            project.itemIDs.contains(item.id) ? "Added" : "Add",
+                            systemImage: project.itemIDs.contains(item.id) ? "checkmark" : "plus"
+                        )
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(project.itemIDs.contains(item.id))
+                    .accessibilityIdentifier("collect.add")
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .padding(.bottom, 6)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
+
+    private func addCurrent(to project: CreationProject) {
+        guard let item, !project.itemIDs.contains(item.id) else { return }
+        _ = creations.add([item.id], to: project.id)
+        collectFeedback.toggle()
+        poke()
     }
 
     // MARK: Actions
@@ -625,6 +750,14 @@ struct MediaViewer: View {
                     if !item.format.isEmpty { LabeledContent("Format", value: item.format) }
                     LabeledContent("Source", value: item.isPhotoLibrary ? "Photos" : "Files")
                 }
+                if let latitude = item.latitude, let longitude = item.longitude {
+                    Section("Place") {
+                        PlaceNameRow(latitude: latitude, longitude: longitude)
+                        LabeledContent(
+                            "Coordinates",
+                            value: String(format: "%.4f, %.4f", latitude, longitude))
+                    }
+                }
                 if item.kind == .livePhoto { Text("Touch and hold the photo to play its motion and sound.") }
                 if item.kind == .video {
                     Section("Gestures") {
@@ -635,6 +768,31 @@ struct MediaViewer: View {
             }.navigationTitle("Details").navigationBarTitleDisplayMode(.inline)
                 .toolbar { Button("Done") { sheet = nil } }
         }.presentationDetents([.medium, .large])
+    }
+}
+
+// Place names are cached by the shared service, so opening Details repeatedly does
+// not repeat the geocoder request. Coordinates remain visible when no name is found.
+private struct PlaceNameRow: View {
+    let latitude: Double
+    let longitude: Double
+    @State private var name: String?
+    @State private var loading = true
+
+    var body: some View {
+        LabeledContent("Place") {
+            if let name {
+                Text(name)
+            } else if loading {
+                ProgressView().controlSize(.mini)
+            } else {
+                Text("Not looked up").foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            name = await PlaceNameService.shared.name(latitude: latitude, longitude: longitude)
+            loading = false
+        }
     }
 }
 

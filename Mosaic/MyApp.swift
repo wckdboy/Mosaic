@@ -9,7 +9,18 @@ import SwiftUI
         #endif
         return LibraryStore()
     }()
-    @State private var creations = CreationStore()
+    @State private var creations: CreationStore = {
+        #if DEBUG
+            // UI tests must never inherit a person's saved projects (or projects from
+            // a previous run). Each launch gets a fresh temporary recipe store.
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+                let root = URL.temporaryDirectory.appending(
+                    path: "Mosaic-UI-Creations-\(UUID().uuidString)", directoryHint: .isDirectory)
+                return CreationStore(url: root.appending(path: "creations.json"))
+            }
+        #endif
+        return CreationStore()
+    }()
     @AppStorage("appearance") private var appearance = "system"
     var body: some Scene {
         WindowGroup {

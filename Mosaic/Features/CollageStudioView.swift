@@ -10,6 +10,8 @@ struct CollageStudioView: View {
     @State private var project: CreationProject
     @State private var layout: CoreCollageLayout?
     @State private var picker = false
+    @State private var replacing = false
+    @State private var replacingIndex: Int?
     @State private var options = false
     @State private var loading = false
     @State private var exporting = false
@@ -88,6 +90,20 @@ struct CollageStudioView: View {
                     initial: project.itemIDs, limit: 40
                 ) { ids in
                     project.itemIDs = ids
+                }
+            }
+            .sheet(isPresented: $replacing) {
+                let index = replacingIndex
+                let current = index.flatMap {
+                    project.itemIDs.indices.contains($0) ? project.itemIDs[$0] : nil
+                }
+                CreationPhotoPicker(
+                    title: "Replace photo", initial: current.map { [$0] } ?? [], limit: 1
+                ) { ids in
+                    guard let index, let id = ids.first,
+                        project.itemIDs.indices.contains(index)
+                    else { return }
+                    project.itemIDs[index] = id
                 }
             }
             .sheet(isPresented: $options) {
@@ -205,6 +221,10 @@ struct CollageStudioView: View {
                                     return true
                                 }
                                 .contextMenu {
+                                    Button("Replace photo", systemImage: "arrow.triangle.2.circlepath") {
+                                        replacingIndex = index
+                                        replacing = true
+                                    }
                                     Button("Move to first", systemImage: "arrow.up.to.line") {
                                         moveFirst(id)
                                     }
@@ -318,7 +338,9 @@ struct CollageStudioView: View {
                 items: store.items, descriptors: MosaicIndexer.shared.descriptors,
                 favorites: store.favorites, count: min(fillCount, sourceItems.count),
                 diversity: 0.68, minGapSeconds: 4, preferRecent: true,
-                seed: UInt64(Date().timeIntervalSince1970), ids: sourceItems.map(\.id))
+                kinds: ["photo", "livePhoto"],
+                seed: UInt64(Date().timeIntervalSince1970), ids: sourceItems.map(\.id),
+                story: project.storyFocus)
             if !picks.isEmpty {
                 project.itemIDs = picks.map(\.id)
             }
@@ -390,6 +412,11 @@ private struct CollageOptionsView: View {
             Form {
                 Section("Project") {
                     TextField("Title", text: $project.title)
+                }
+                Section("Focus") {
+                    TextField("e.g. ocean, family, celebration", text: $project.storyFocus)
+                    Text("Smart fill favors photos whose on-device tags and meanings match this idea.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Composition") {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
