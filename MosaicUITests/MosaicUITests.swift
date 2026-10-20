@@ -270,7 +270,7 @@ import XCTest
         XCTAssertTrue(app.textFields["mosaic.search"].waitForExistence(timeout: 5))
         // A toolbar must not consume nearly the whole canvas at large text sizes.
         XCTAssertGreaterThan(app.collectionViews.firstMatch.frame.height, 180)
-        app.buttons["Canvas options"].tap()
+        app.buttons["mosaic.filters"].tap()
         app.buttons["Zoom"].tap()
         app.buttons["Zoom out"].tap()
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))

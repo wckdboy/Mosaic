@@ -8,6 +8,7 @@ struct CollectionsView: View {
     @State private var name = ""
     @State private var deleting: MediaCollection?
     @State private var renaming: MediaCollection?
+    @State private var renamingLens: SavedLens?
     @State private var groups = Groups()
     // Smart groups and memberships are derived in one background pass when inputs
     // change, rather than filtering the whole library several times per render.
@@ -92,6 +93,7 @@ struct CollectionsView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
+                                    Button("Rename", systemImage: "pencil") { renamingLens = lens }
                                     Button("Delete view", systemImage: "trash", role: .destructive) {
                                         store.deleteLens(lens)
                                     }
@@ -179,6 +181,9 @@ struct CollectionsView: View {
             .sheet(item: $renaming) { collection in
                 CollectionRenameView(collection: collection)
             }
+            .sheet(item: $renamingLens) { lens in
+                SavedViewRenameView(lens: lens)
+            }
         }
     }
     private func smartCollection(_ title: String, symbol: String, items: [MediaItem]) -> some View {
@@ -239,6 +244,44 @@ private struct CollectionRenameView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         store.renameCollection(collection, to: name)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+private struct SavedViewRenameView: View {
+    @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let lens: SavedLens
+    @State private var name: String
+    @FocusState private var focused: Bool
+
+    init(lens: SavedLens) {
+        self.lens = lens
+        _name = State(initialValue: lens.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("View name", text: $name)
+                    .focused($focused)
+            }
+            .navigationTitle("Rename saved view")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.renameLens(lens, to: name)
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

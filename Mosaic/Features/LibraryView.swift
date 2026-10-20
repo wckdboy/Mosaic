@@ -65,6 +65,8 @@ struct MediaBrowser: View {
     @State private var smartPicks = false
     @State private var importing = false
     @State private var visibleItems: [MediaItem] = []
+    @State private var visibleIndex: [String: Int] = [:]
+    @State private var prefetchedThrough = -1
     @State private var groups: [DayGroup] = []
 
     init(
@@ -253,6 +255,9 @@ struct MediaBrowser: View {
             }.value
             if !Task.isCancelled {
                 visibleItems = result.0
+                visibleIndex = Dictionary(
+                    uniqueKeysWithValues: result.0.enumerated().map { ($0.element.id, $0.offset) })
+                prefetchedThrough = -1
                 groups = result.1
             }
         }
@@ -383,6 +388,7 @@ struct MediaBrowser: View {
                                             }
                                         }
                                     }
+                                    .onAppear { prefetchNeighbors(of: item) }
                                     .matchedTransitionSource(id: item.id, in: viewerTransition)
                                 }
                             }.padding(.horizontal, 3)
@@ -455,6 +461,7 @@ struct MediaBrowser: View {
                                             }
                                         }
                                     }
+                                    .onAppear { prefetchNeighbors(of: item) }
                                     .matchedTransitionSource(id: item.id, in: viewerTransition)
                             }
                         }.padding(.horizontal, 3)
@@ -561,6 +568,17 @@ struct MediaBrowser: View {
             viewer = ViewerRoute(items: visibleItems, selectedID: item.id)
         }
     }
+    // Warm the next row or two while the current tiles settle. The caching manager
+    // deduplicates requests, and one rolling watermark avoids a task per visible cell.
+    private func prefetchNeighbors(of item: MediaItem) {
+        guard item.isPhotoLibrary, let index = visibleIndex[item.id], index + 10 > prefetchedThrough
+        else { return }
+        let end = min(visibleItems.count, index + 11)
+        guard index + 1 < end else { return }
+        prefetchedThrough = end - 1
+        PhotoThumbnailRequest.prefetch(Array(visibleItems[(index + 1)..<end]), pixels: 400)
+    }
+
     private func toggleSelectAll() {
         let visible = Set(visibleItems.map(\.id))
         if allVisibleSelected {

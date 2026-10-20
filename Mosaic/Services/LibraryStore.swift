@@ -490,6 +490,14 @@ final class LibraryStore {
         persist()
         return lens
     }
+    func renameLens(_ lens: SavedLens, to name: String) {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+            let index = archive.lenses?.firstIndex(where: { $0.id == lens.id })
+        else { return }
+        archive.lenses?[index].name = cleaned
+        persist()
+    }
     func deleteLens(_ lens: SavedLens) {
         archive.lenses?.removeAll { $0.id == lens.id }
         persist()

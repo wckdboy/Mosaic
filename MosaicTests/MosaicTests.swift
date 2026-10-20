@@ -136,6 +136,25 @@ struct ArchiveTests {
         #expect(store.collections.first?.name == "Coast")
         #expect(store.collections.first?.itemIDs == ["fixture:1", "fixture:2"])
     }
+    @MainActor @Test func renamingASavedViewKeepsItsQuery() async throws {
+        let folder = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = LibraryStore(
+            repository: ArchiveRepository(url: folder.appending(path: "library.json")), isolated: true)
+        await store.start()
+        store.createLens(
+            name: "Night", query: "night", kind: .photo, favoritesOnly: true, source: .files,
+            sort: .name)
+        guard let lens = store.lenses.first else {
+            Issue.record("Expected a saved view")
+            return
+        }
+        store.renameLens(lens, to: "  Evenings  ")
+        #expect(store.lenses.first?.name == "Evenings")
+        #expect(store.lenses.first?.query == "night")
+        #expect(store.lenses.first?.favoritesOnly == true)
+        #expect(store.lenses.first?.source == .files)
+    }
     @Test func corruptArchiveIsNotOverwritten() async throws {
         let url = URL.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
