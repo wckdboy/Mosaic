@@ -20,7 +20,11 @@ These are implemented and documented in the README; the roadmap keeps the *next*
 | S1 | Rust engine for similarity, clustering, duplicates, curation, and layout | Collage, photobook, smart picks, and the canvas at library scale use `rust/mosaic-core` through a JSON C ABI. 50k-item benchmark is part of the repo. |
 | S2 | Create destination | Collage studio, photobook studio, smart picks, saved recipes, high-resolution image export, and multi-page PDF export. |
 | S3 | Large-library indexing | Three workers on battery, six while charging, thermal pauses, measured throughput, 10-minute cache checkpoints, and incremental Rust index updates. |
-| S4 | Project recipes | Creations persist stable identifiers, style, seed, and finish; geometry is rebuilt from the current library. |
+| S4 | Project recipes | Creations persist stable identifiers, style, seed, finish, chapter titles, cover choice, and story focus; geometry is rebuilt from the current library. |
+| S5 | Collect while browsing | The viewer's Add to project menu targets any book or collage; a collect bar adds the current photo while swiping and shows the live count. |
+| S6 | Project shelf | Searchable, filterable shelf for every book and collage with rename, duplicate, kind filters, and deletion. |
+| S7 | Location-aware chapters | Photos capture locations split chapters by distance; optional reverse geocoding names chapters and is cached locally. |
+| S8 | Story focus | Smart curate uses on-device word meanings to favor photos that fit an idea such as ocean, family, or celebration. |
 
 ### Next on the create surface
 
