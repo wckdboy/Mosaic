@@ -299,6 +299,7 @@ final class CreationStore {
         copy.createdAt = Date()
         copy.updatedAt = Date()
         projects.append(copy)
+        projects.sort { $0.updatedAt > $1.updatedAt }
         persist()
     }
 

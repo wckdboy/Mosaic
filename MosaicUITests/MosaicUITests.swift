@@ -336,6 +336,55 @@ import XCTest
         XCTAssertTrue(app.buttons["Projects"].waitForExistence(timeout: 5))
     }
 
+    // A saved view is a live query, not a copied collection: save a search and reopen
+    // it from Collections against the same library.
+    func testSavedViewReopensSearchFromCollections() throws {
+        launch()
+        app.buttons["Mosaic view"].tap()
+        let search = app.textFields["mosaic.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Study_015\n")
+        XCTAssertTrue(
+            app.cells.containing(NSPredicate(format: "label CONTAINS %@", "Study_015")).firstMatch
+                .waitForExistence(timeout: 5))
+        app.buttons["mosaic.filters"].tap()
+        app.buttons["Save view"].tap()
+        let name = app.alerts.textFields.firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30))
+        name.typeText("Fifteenth")
+        app.alerts.buttons["Save"].tap()
+
+        app.tabBars.buttons["Collections"].tap()
+        XCTAssertTrue(app.staticTexts["Saved views"].waitForExistence(timeout: 10))
+        app.staticTexts["Fifteenth"].tap()
+        XCTAssertTrue(app.navigationBars["Fifteenth"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["media-fixture:14"].waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'media-fixture:'")).count,
+            1)
+        capture("Saved view")
+    }
+
+    // Selection order matters to Hero, Scatter, Stack, and story-led books. Selecting
+    // two items must expose creation actions from the selection bar.
+    func testSelectionCanCreateAProject() throws {
+        launch()
+        app.buttons["library.options"].tap()
+        app.buttons["Select items"].tap()
+        app.buttons["media-fixture:0"].tap()
+        app.buttons["media-fixture:1"].tap()
+        XCTAssertTrue(app.staticTexts["2"].waitForExistence(timeout: 5))
+        app.buttons["Selection actions"].tap()
+        XCTAssertTrue(app.buttons["Make a photobook"].waitForExistence(timeout: 5))
+        app.buttons["Make a photobook"].tap()
+        XCTAssertTrue(app.buttons["book.curate"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS '2 photos'")).firstMatch.exists)
+    }
+
     func testProjectShelfCreatesRenamesAndDuplicates() throws {
         launch()
         app.tabBars.buttons["Create"].tap()

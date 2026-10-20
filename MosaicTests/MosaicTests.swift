@@ -65,6 +65,55 @@ struct ArchiveTests {
         try await repository.save(LibraryArchive())
         #expect(try await repository.load().files.isEmpty)
     }
+    @Test func savedViewsSurviveArchiveRoundTrip() async throws {
+        let folder = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let repository = ArchiveRepository(url: folder.appending(path: "library.json"))
+        var archive = LibraryArchive()
+        archive.lenses = [
+            SavedLens(name: "Blue videos", query: "blue", kind: .video, sort: .oldest)
+        ]
+        try await repository.save(archive)
+        let loaded = try await repository.load()
+        #expect(loaded.lenses?.count == 1)
+        #expect(loaded.lenses?.first?.name == "Blue videos")
+        #expect(loaded.lenses?.first?.query == "blue")
+        #expect(loaded.lenses?.first?.kind == .video)
+        #expect(loaded.lenses?.first?.sort == .oldest)
+    }
+    @Test func olderArchivesWithoutSavedViewsDecode() throws {
+        let archive = LibraryArchive()
+        let data = try JSONEncoder().encode(archive)
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            Issue.record("Expected a JSON object")
+            return
+        }
+        object.removeValue(forKey: "lenses")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(LibraryArchive.self, from: legacy)
+        #expect(decoded.lenses?.isEmpty != false)
+    }
+    @Test func savedViewSummaryIsReadable() {
+        let lens = SavedLens(name: "Night", query: "night", kind: .photo, sort: .name)
+        #expect(lens.summary.contains("night"))
+        #expect(lens.summary.contains("Photos"))
+        #expect(lens.summary.contains("Name"))
+    }
+    @MainActor @Test func renamingACollectionKeepsItsMembers() async throws {
+        let folder = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = LibraryStore(
+            repository: ArchiveRepository(url: folder.appending(path: "library.json")), isolated: true)
+        await store.start()
+        store.createCollection("Trip", items: ["fixture:1", "fixture:2"])
+        guard let collection = store.collections.first else {
+            Issue.record("Expected a collection")
+            return
+        }
+        store.renameCollection(collection, to: "  Coast  ")
+        #expect(store.collections.first?.name == "Coast")
+        #expect(store.collections.first?.itemIDs == ["fixture:1", "fixture:2"])
+    }
     @Test func corruptArchiveIsNotOverwritten() async throws {
         let url = URL.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }

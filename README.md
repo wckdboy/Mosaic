@@ -32,7 +32,8 @@ Screenshots use simulator sample media. No sample media ships with the app.
 - Photos access with full or limited permission, plus media opened through Files.
 - Recursive discovery in folders you explicitly connect—including nested Downloads folders.
 - Horizontal or vertical gallery browsing with free momentum scrolling, adjustable density, date grouping, search by filename, format, year, or analyzed content, and sorting.
-- Favorites, named collections, multi-selection, and quick organization actions.
+- Favorites, named collections, multi-selection, and quick organization actions. Save a search and media type as a **Saved view**; it lives in Collections and reopens against the current library instead of copying media.
+- Selection keeps the order you tap, and the selection bar can start a collage or photobook without leaving the gallery. Collections can be renamed without changing their media.
 - Full-screen viewing with pinch/double-tap zoom, swipe paging and swipe-down to close, GIF/APNG playback, Live Photos, metadata, and sharing. Compact landscape controls preserve media space at large text sizes; canvas grouping and zoom move into menus.
 
 ### Mosaic canvas
@@ -243,7 +244,7 @@ xcrun simctl addmedia booted /tmp/mosaic-media/*.jpg \
 
 ### Verification and remaining work
 
-The October 20, 2026 simulator pass runs **81 unit/integration tests** plus **19 UI journeys and accessibility audits** on an iPhone 17 Pro / iOS 26.1 simulator. The UI suite was run in focused batches after the simulator’s automation runner became unstable across a single long session; every journey passed in its batch. Tests also cover the published [AWS Signature V4 vector](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html), atomic archive round trips and corruption, nested discovery, bookmark traversal rejection, collision-safe file moves, symlink confinement, move-journal recovery, persistent batch Undo, subtitle boundaries, photobook cover/chapter defaults, location grouping, and semantic story focus. Hardening regressions exercise malformed cloud listings, oversized chunked responses, partial-download cleanup, cancelled viewer loads, and file-read confinement.
+The October 20, 2026 simulator pass runs **85 unit/integration tests** plus **21 UI journeys and accessibility audits** on an iPhone 17 Pro / iOS 26.1 simulator. The UI suite was run in focused batches after the simulator’s automation runner became unstable across a single long session; every journey passed in its batch. Tests also cover the published [AWS Signature V4 vector](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-query-string-auth.html), atomic archive round trips and corruption, nested discovery, bookmark traversal rejection, collision-safe file moves, symlink confinement, move-journal recovery, persistent batch Undo, subtitle boundaries, saved-view persistence, photobook cover/chapter defaults, location grouping, and semantic story focus. Hardening regressions exercise malformed cloud listings, oversized chunked responses, partial-download cleanup, cancelled viewer loads, and file-read confinement.
 
 This is a focused source review and simulator regression pass, not a comprehensive security assessment or a guarantee of stability on every media format and provider.
 

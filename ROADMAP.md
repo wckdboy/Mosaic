@@ -25,6 +25,7 @@ These are implemented and documented in the README; the roadmap keeps the *next*
 | S6 | Project shelf | Searchable, filterable shelf for every book and collage with rename, duplicate, kind filters, and deletion. |
 | S7 | Location-aware chapters | Photos capture locations split chapters by distance; optional reverse geocoding names chapters and is cached locally. |
 | S8 | Story focus | Smart curate uses on-device word meanings to favor photos that fit an idea such as ocean, family, or celebration. |
+| S9 | Saved views | Save a query and media type from the gallery or canvas; the live view appears in Collections and reopens against the current library. |
 
 ### Next on the create surface
 
@@ -53,15 +54,6 @@ These checks take priority over expanding the feature list.
 | Q7 | 50k-library device pass | Measure first enumeration, thumbnail analysis throughput, thermal state, battery, memory, and foreground responsiveness on older and newer iPhones and iPads with 50,000+ photos. Establish a budget for the Rust index and cache checkpoint. |
 
 ## Next candidates
-
-### F1 · Saved lenses
-
-Save a useful search and its filters as a live view: for example, favorite videos from a source, or images matching recognized text. Reopening a lens shows the current matching library without copying media.
-
-- **Placement:** Save from the existing search/filter surface; reopen from Collections or a compact Library shortcut.
-- **First version:** Named lenses with query, media type, source, favorites, sort, and layout. Editing or deleting a lens changes only the saved view.
-- **Done when:** Lenses survive relaunch, update as the library changes, handle disconnected sources clearly, and restore their browsing position. Test large-library filtering and empty results.
-- **Later:** Optional color or text-sentiment criteria using existing cached analysis, with clear handling of unanalyzed items.
 
 ### F2 · Organization review inbox
 

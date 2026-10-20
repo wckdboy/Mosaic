@@ -7,6 +7,7 @@ struct CollectionsView: View {
     @State private var creating = false
     @State private var name = ""
     @State private var deleting: MediaCollection?
+    @State private var renaming: MediaCollection?
     @State private var groups = Groups()
     // Smart groups and memberships are derived in one background pass when inputs
     // change, rather than filtering the whole library several times per render.
@@ -56,6 +57,47 @@ struct CollectionsView: View {
                             "Live Photos", symbol: "livephoto",
                             items: groups.live)
                     }
+                    if !store.lenses.isEmpty {
+                        HStack {
+                            Text("Saved views").font(.title3.weight(.semibold))
+                            Spacer()
+                            Text(store.lenses.count.formatted())
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        VStack(spacing: 0) {
+                            ForEach(store.lenses) { lens in
+                                NavigationLink {
+                                    MediaBrowser(
+                                        title: lens.name, items: store.items,
+                                        query: lens.query, kind: lens.kind, sort: lens.sort)
+                                } label: {
+                                    HStack(spacing: 14) {
+                                        Image(systemName: "bookmark")
+                                            .font(.title3.weight(.light))
+                                            .frame(width: 50, height: 50)
+                                            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 13))
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(lens.name).font(.headline)
+                                            Text(lens.summary).font(.caption).foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 8)
+                                        Image(systemName: "chevron.right").font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button("Delete view", systemImage: "trash", role: .destructive) {
+                                        store.deleteLens(lens)
+                                    }
+                                }
+                                if lens.id != store.lenses.last?.id { Divider() }
+                            }
+                        }
+                    }
                     HStack {
                         Text("Your collections").font(.title3.weight(.semibold))
                         Spacer()
@@ -92,6 +134,7 @@ struct CollectionsView: View {
                                 }.contentShape(Rectangle())
                             }.buttonStyle(.plain)
                                 .contextMenu {
+                                    Button("Rename", systemImage: "pencil") { renaming = collection }
                                     Button("Delete collection", systemImage: "trash", role: .destructive) {
                                         deleting = collection
                                     }
@@ -101,8 +144,11 @@ struct CollectionsView: View {
                 }.padding(20).padding(.bottom, 80)
             }
             .mosaicBackground().navigationTitle("Collections")
-            .task(id: GroupKey(items: store.items, favorites: store.favorites, collections: store.collections)) {
-                let key = GroupKey(items: store.items, favorites: store.favorites, collections: store.collections)
+            .task(
+                id: GroupKey(items: store.items, favorites: store.favorites, collections: store.collections)
+            ) {
+                let key = GroupKey(
+                    items: store.items, favorites: store.favorites, collections: store.collections)
                 let derived = await Task.detached(priority: .userInitiated) { Self.derive(key) }.value
                 if !Task.isCancelled { groups = derived }
             }
@@ -127,6 +173,9 @@ struct CollectionsView: View {
                 }
             } message: {
                 Text("Your original photos and videos will remain untouched.")
+            }
+            .sheet(item: $renaming) { collection in
+                CollectionRenameView(collection: collection)
             }
         }
     }
@@ -157,6 +206,45 @@ struct CollectionsView: View {
                     .secondary)
             }
         }
+    }
+}
+
+// Renaming a collection is metadata-only; it never touches the referenced media.
+private struct CollectionRenameView: View {
+    @Environment(LibraryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let collection: MediaCollection
+    @State private var name: String
+    @FocusState private var focused: Bool
+
+    init(collection: MediaCollection) {
+        self.collection = collection
+        _name = State(initialValue: collection.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Collection name", text: $name)
+                    .focused($focused)
+            }
+            .navigationTitle("Rename collection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.renameCollection(collection, to: name)
+                        dismiss()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.medium])
     }
 }
 

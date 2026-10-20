@@ -162,7 +162,7 @@ struct CreateView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(creations.projects) { project in
+                        ForEach(creations.projects.prefix(8)) { project in
                             recentCard(project)
                         }
                     }
@@ -181,7 +181,7 @@ struct CreateView: View {
                         .fill(
                             project.finish == .accent
                                 ? AnyShapeStyle(MosaicTheme.accent) : AnyShapeStyle(.quaternary))
-                    if let id = project.itemIDs.first, let item = store.item(id) {
+                    if let item = coverItem(project) {
                         MediaThumbnail(item: item, pixels: 300)
                             .clipShape(.rect(cornerRadius: 14))
                     } else {
@@ -208,6 +208,11 @@ struct CreateView: View {
                 creations.delete(project)
             }
         }
+    }
+
+    private func coverItem(_ project: CreationProject) -> MediaItem? {
+        if let id = project.coverItemID, let item = store.item(id) { return item }
+        return project.itemIDs.first.flatMap { store.item($0) }
     }
 
     private var emptyLibrary: some View {

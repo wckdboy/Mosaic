@@ -80,6 +80,8 @@ struct LibraryArchive: Codable, Sendable {
     var folders: [FolderConnection]? = []
     var favorites: Set<String> = []
     var collections: [MediaCollection] = []
+    // Optional so archives written before saved views still decode.
+    var lenses: [SavedLens]? = []
     var playbackPositions: [String: Double] = [:]
     // Optional for backward-compatible decoding of libraries created before text search.
     var recognizedText: [String: String]? = [:]
@@ -89,7 +91,7 @@ struct LibraryArchive: Codable, Sendable {
     var pendingFileMove: PendingFileMove?
 }
 
-enum MediaSort: String, CaseIterable {
+enum MediaSort: String, CaseIterable, Codable, Sendable {
     case newest = "Newest first"
     case oldest = "Oldest first"
     case name = "Name"

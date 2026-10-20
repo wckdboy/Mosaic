@@ -44,13 +44,16 @@ struct MediaBrowser: View {
     var collection: MediaCollection?
     @AppStorage("textRecognition") private var textRecognition = false
     @AppStorage("libraryLayout") private var libraryLayout = "gallery"
-    @State private var query = ""
+    @State private var query: String
     @State private var kind: MediaItem.Kind?
-    @State private var sort = MediaSort.newest
+    @State private var sort: MediaSort
     @AppStorage("gridColumns") private var columns = 3
     @AppStorage("galleryDirection") private var galleryDirection = "vertical"
     @State private var selecting = false
-    @State private var selection: Set<String> = []
+    // Ordered, not a Set: Hero, Scatter, Stack, and story-led books use tap order.
+    @State private var selection: [String] = []
+    @State private var savingLens = false
+    @State private var lensName = ""
     @State private var viewer: ViewerRoute?
     @State private var organize = false
     @State private var autoOrganize = false
@@ -60,6 +63,20 @@ struct MediaBrowser: View {
     @State private var importing = false
     @State private var visibleItems: [MediaItem] = []
     @State private var groups: [DayGroup] = []
+
+    init(
+        title: String, items: [MediaItem], showsOverview: Bool = false,
+        collection: MediaCollection? = nil, query: String = "", kind: MediaItem.Kind? = nil,
+        sort: MediaSort = .newest
+    ) {
+        self.title = title
+        self.items = items
+        self.showsOverview = showsOverview
+        self.collection = collection
+        _query = State(initialValue: query)
+        _kind = State(initialValue: kind)
+        _sort = State(initialValue: sort)
+    }
 
     private var filterKey: FilterKey {
         FilterKey(
@@ -75,6 +92,15 @@ struct MediaBrowser: View {
         let sort: MediaSort
         let text: [String: String]
         let index: Int
+    }
+    private var allVisibleSelected: Bool {
+        !visibleItems.isEmpty && visibleItems.allSatisfy { selection.contains($0.id) }
+    }
+    private var suggestedLensName: String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed.capitalized }
+        if let kind { return kind.title }
+        return sort == .newest ? "All media" : sort.rawValue
     }
     struct DayGroup: Identifiable, Sendable {
         let date: Date
@@ -135,6 +161,12 @@ struct MediaBrowser: View {
                     }
                     Button("Smart picks", systemImage: "wand.and.stars") { smartPicks = true }
                         .disabled(items.isEmpty)
+                    Button("Save view", systemImage: "bookmark") {
+                        lensName = suggestedLensName
+                        savingLens = true
+                    }
+                    .disabled(items.isEmpty)
+                    .accessibilityIdentifier("library.saveView")
                     Button("Open files", systemImage: "folder.badge.plus") { importing = true }
                     if !store.hasPhotoAccess {
                         Button("Connect Photos", systemImage: "photo.badge.plus") {
@@ -150,12 +182,17 @@ struct MediaBrowser: View {
         .safeAreaInset(edge: .bottom) {
             if selecting {
                 HStack {
-                    Button(selection.count == visibleItems.count ? "Deselect all" : "Select all") {
-                        selection = selection.count == visibleItems.count ? [] : Set(visibleItems.map(\.id))
-                    }
+                    Button(allVisibleSelected ? "Deselect all" : "Select all") { toggleSelectAll() }
                     Spacer()
                     Text("\(selection.count)").monospacedDigit().foregroundStyle(.secondary)
                     Menu {
+                        Button("Make a collage", systemImage: "square.on.square.dashed") {
+                            openCreation(.collage)
+                        }
+                        Button("Make a photobook", systemImage: "book.closed") {
+                            openCreation(.photobook)
+                        }
+                        Divider()
                         Button("Add to collection", systemImage: "rectangle.stack.badge.plus") {
                             organize = true
                         }
@@ -163,7 +200,7 @@ struct MediaBrowser: View {
                     } label: {
                         Image(systemName: "rectangle.stack.badge.plus")
                     }
-                    .accessibilityLabel("Organize selection").disabled(selection.isEmpty)
+                    .accessibilityLabel("Selection actions").disabled(selection.isEmpty)
                 }.padding(18).glassEffect(in: .capsule).padding(.horizontal, 16).padding(.bottom, 8)
             }
         }
@@ -221,15 +258,26 @@ struct MediaBrowser: View {
             }
         }
         .fullScreenCover(isPresented: $autoOrganize) {
-            AutoOrganizeView(selectedIDs: selecting ? selection : Set(items.map(\.id)))
+            AutoOrganizeView(selectedIDs: selecting ? Set(selection) : Set(items.map(\.id)))
         }
-        .sheet(isPresented: $organize) { OrganizeSheet(selection: selection) }
+        .sheet(isPresented: $organize) { OrganizeSheet(selection: Set(selection)) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) {
             result in
             switch result {
             case .success(let urls): Task { await store.openFiles(urls) }
             case .failure(let error): store.message = error.localizedDescription
             }
+        }
+        .alert("Save view", isPresented: $savingLens) {
+            TextField("Name", text: $lensName)
+            Button("Save") {
+                store.createLens(name: lensName, query: query, kind: kind, sort: sort)
+                lensName = ""
+            }
+            .disabled(lensName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) { lensName = "" }
+        } message: {
+            Text("Saved views reopen this search, media type, and sort from Collections.")
         }
     }
 
@@ -296,12 +344,12 @@ struct MediaBrowser: View {
                                         }
                                         Button("Make a collage", systemImage: "square.on.square.dashed") {
                                             creation = .collage(
-                                                itemIDs: selection.isEmpty ? [item.id] : Array(selection),
+                                                itemIDs: selection.isEmpty ? [item.id] : selection,
                                                 title: CreationProject.suggestedTitle(.collage))
                                         }
                                         Button("Make a photobook", systemImage: "book.closed") {
                                             creation = .photobook(
-                                                itemIDs: selection.isEmpty ? [item.id] : Array(selection),
+                                                itemIDs: selection.isEmpty ? [item.id] : selection,
                                                 title: CreationProject.suggestedTitle(.photobook))
                                         }
                                         if let collection {
@@ -356,10 +404,29 @@ struct MediaBrowser: View {
                                         Button("Find similar", systemImage: "square.on.square") {
                                             similar = item
                                         }
+                                        Button(
+                                            store.favorites.contains(item.id) ? "Unfavorite" : "Favorite",
+                                            systemImage: "heart"
+                                        ) { store.toggleFavorite(item.id) }
                                         Button("Add to collection", systemImage: "rectangle.stack.badge.plus")
                                         {
                                             selection = [item.id]
                                             organize = true
+                                        }
+                                        Button("Make a collage", systemImage: "square.on.square.dashed") {
+                                            creation = .collage(
+                                                itemIDs: selection.isEmpty ? [item.id] : selection,
+                                                title: CreationProject.suggestedTitle(.collage))
+                                        }
+                                        Button("Make a photobook", systemImage: "book.closed") {
+                                            creation = .photobook(
+                                                itemIDs: selection.isEmpty ? [item.id] : selection,
+                                                title: CreationProject.suggestedTitle(.photobook))
+                                        }
+                                        if let collection {
+                                            Button("Remove from collection", systemImage: "minus.circle") {
+                                                store.remove([item.id], from: collection)
+                                            }
                                         }
                                     }
                             }
@@ -420,7 +487,7 @@ struct MediaBrowser: View {
         }.buttonStyle(.plain).accessibilityAddTraits(kind == value ? .isSelected : [])
     }
     private func openCreation(_ kind: CreationProject.Kind) {
-        let ids = selection.isEmpty ? visibleItems.map(\.id) : Array(selection)
+        let ids = selection.isEmpty ? visibleItems.map(\.id) : selection
         creation =
             kind == .collage
             ? .collage(itemIDs: ids, title: CreationProject.suggestedTitle(.collage))
@@ -429,9 +496,23 @@ struct MediaBrowser: View {
 
     private func open(_ item: MediaItem) {
         if selecting {
-            if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
+            if let index = selection.firstIndex(of: item.id) {
+                selection.remove(at: index)
+            } else {
+                selection.append(item.id)
+            }
         } else {
             viewer = ViewerRoute(items: visibleItems, selectedID: item.id)
+        }
+    }
+    private func toggleSelectAll() {
+        let visible = Set(visibleItems.map(\.id))
+        if allVisibleSelected {
+            selection.removeAll { visible.contains($0) }
+        } else {
+            for id in visibleItems.map(\.id) where !selection.contains(id) {
+                selection.append(id)
+            }
         }
     }
     private func presentLimitedPicker() {

@@ -299,13 +299,13 @@ struct MosaicCanvas: UIViewRepresentable {
         private func refreshResolution(_ view: UICollectionView) {
             let stale = view.indexPathsForVisibleItems.filter { path in
                 guard let cell = view.cellForItem(at: path) as? MosaicCanvasCell else { return false }
-                return cell.pixels != pixels(for: path)
+                return cell.pixels != pixels(for: path, in: view)
             }
             if !stale.isEmpty { view.reconfigureItems(at: stale) }
         }
-        private func pixels(for path: IndexPath) -> Int {
+        private func pixels(for path: IndexPath, in view: UICollectionView) -> Int {
             guard let layout, let frame = layout.baseFrame(at: path) else { return 256 }
-            let points = max(frame.width, frame.height) * layout.scale * UIScreen.main.scale
+            let points = max(frame.width, frame.height) * layout.scale * view.traitCollection.displayScale
             return points <= 140 ? 128 : points <= 300 ? 256 : points <= 560 ? 512 : 768
         }
 
@@ -373,7 +373,7 @@ struct MosaicCanvas: UIViewRepresentable {
             if let cell = cell as? MosaicCanvasCell, let item = item(at: indexPath) {
                 let hero = layout?.focused == true && indexPath == IndexPath(item: 0, section: 0)
                 cell.configure(
-                    item, pixels: pixels(for: indexPath), tint: tints[item.id],
+                    item, pixels: pixels(for: indexPath, in: collectionView), tint: tints[item.id],
                     favorite: favorites.contains(item.id), hero: hero)
             }
             return cell
@@ -424,7 +424,7 @@ struct MosaicCanvas: UIViewRepresentable {
         }
         // Photos thumbnails for upcoming tiles are warmed in the caching manager.
         func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-            let groups = Dictionary(grouping: indexPaths.compactMap { path in item(at: path).map { ($0, pixels(for: path)) } }) { $0.1 }
+            let groups = Dictionary(grouping: indexPaths.compactMap { path in item(at: path).map { ($0, pixels(for: path, in: collectionView)) } }) { $0.1 }
             for (pixels, entries) in groups {
                 PhotoThumbnailRequest.prefetch(entries.map(\.0), pixels: pixels)
             }
@@ -432,7 +432,7 @@ struct MosaicCanvas: UIViewRepresentable {
         func collectionView(
             _ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]
         ) {
-            let groups = Dictionary(grouping: indexPaths.compactMap { path in item(at: path).map { ($0, pixels(for: path)) } }) { $0.1 }
+            let groups = Dictionary(grouping: indexPaths.compactMap { path in item(at: path).map { ($0, pixels(for: path, in: collectionView)) } }) { $0.1 }
             for (pixels, entries) in groups {
                 PhotoThumbnailRequest.cancelPrefetch(entries.map(\.0), pixels: pixels)
             }
@@ -457,7 +457,7 @@ final class CanvasCollectionView: UICollectionView {
 // costs O(visible tiles) rather than re-laying out the whole library every frame.
 final class MosaicCanvasLayout: UICollectionViewLayout {
     static let headerKind = "mosaic-island-header"
-    static let unit: CGFloat = 112
+    nonisolated static let unit: CGFloat = 112
     static let gap: CGFloat = 4
     static let islandGap: CGFloat = 64
     static let headerSpace: CGFloat = 44

@@ -64,6 +64,7 @@ final class LibraryStore {
     var canUndoOrganization: Bool { archive.organizationUndo != nil }
     var favorites: Set<String> { archive.favorites }
     var collections: [MediaCollection] { archive.collections }
+    var lenses: [SavedLens] { archive.lenses ?? [] }
     var hasPhotoAccess: Bool { authorization == .authorized || authorization == .limited }
 
     init(repository: ArchiveRepository = ArchiveRepository(), isolated: Bool = false) {
@@ -452,6 +453,14 @@ final class LibraryStore {
         archive.collections.append(MediaCollection(name: cleaned, itemIDs: items))
         persist()
     }
+    func renameCollection(_ collection: MediaCollection, to name: String) {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+            let index = archive.collections.firstIndex(where: { $0.id == collection.id })
+        else { return }
+        archive.collections[index].name = cleaned
+        persist()
+    }
     func add(_ ids: Set<String>, to collection: MediaCollection) {
         guard let index = archive.collections.firstIndex(where: { $0.id == collection.id }) else { return }
         archive.collections[index].itemIDs.formUnion(ids)
@@ -464,6 +473,22 @@ final class LibraryStore {
     }
     func deleteCollection(_ collection: MediaCollection) {
         archive.collections.removeAll { $0.id == collection.id }
+        persist()
+    }
+    @discardableResult
+    func createLens(name: String, query: String, kind: MediaItem.Kind?, sort: MediaSort) -> SavedLens? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let lens = SavedLens(
+            name: cleaned, query: query.trimmingCharacters(in: .whitespacesAndNewlines),
+            kind: kind, sort: sort)
+        if archive.lenses == nil { archive.lenses = [] }
+        archive.lenses?.insert(lens, at: 0)
+        persist()
+        return lens
+    }
+    func deleteLens(_ lens: SavedLens) {
+        archive.lenses?.removeAll { $0.id == lens.id }
         persist()
     }
     func forgetFile(_ item: MediaItem) {

@@ -33,6 +33,8 @@ struct MosaicView: View {
     // with a Refresh pill rather than rearranging tiles under the user's finger.
     @State private var shownIndexRevision = -1
     @State private var shownAnalyzedCount = 0
+    @State private var savingLens = false
+    @State private var lensName = ""
     private var indexer: MosaicIndexer { MosaicIndexer.shared }
 
     private var focus: MediaItem? { trail.last }
@@ -125,6 +127,18 @@ struct MosaicView: View {
             {
                 applyIndex()
             }
+        }
+        .alert("Save view", isPresented: $savingLens) {
+            TextField("Name", text: $lensName)
+            Button("Save") {
+                store.createLens(
+                    name: lensName, query: filter.query, kind: filter.kind, sort: .newest)
+                lensName = ""
+            }
+            .disabled(lensName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) { lensName = "" }
+        } message: {
+            Text("Saved views reopen this search and media type from Collections.")
         }
     }
 
@@ -329,6 +343,12 @@ struct MosaicView: View {
                     filter = MosaicFilter(query: query)
                 }
             }
+            Divider()
+            Button("Save view", systemImage: "bookmark") {
+                let terms = filter.query.trimmingCharacters(in: .whitespacesAndNewlines)
+                lensName = terms.isEmpty ? filter.kind?.title ?? "All media" : terms.capitalized
+                savingLens = true
+            }
         } label: {
             Image(
                 systemName: filter.isActive
@@ -336,7 +356,9 @@ struct MosaicView: View {
             )
             .frame(minWidth: 32, minHeight: 44)
         }.accessibilityLabel(
-            compactHeight ? "Canvas options" : filter.isActive ? "Filters active" : "Filter media")
+            compactHeight ? "Canvas options" : filter.isActive ? "Filters active" : "Filter media"
+        )
+        .accessibilityIdentifier("mosaic.filters")
     }
     private var modeBinding: Binding<MosaicGrouping> {
         Binding(

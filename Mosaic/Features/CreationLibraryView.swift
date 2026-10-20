@@ -96,7 +96,17 @@ struct CreationLibraryView: View {
                     BookStudioView(project: project)
                 }
             }
-            .alert("Rename project", isPresented: .constant(renaming != nil)) {
+            .alert(
+                "Rename project",
+                isPresented: Binding(
+                    get: { renaming != nil },
+                    set: {
+                        if !$0 {
+                            renaming = nil
+                            renameText = ""
+                        }
+                    })
+            ) {
                 TextField("Name", text: $renameText)
                 Button("Save") {
                     if let renaming { creations.rename(renaming, to: renameText) }

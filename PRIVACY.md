@@ -4,7 +4,7 @@ Mosaic has no account, advertising, analytics SDK, or hosted media service. It d
 
 ## Stored on this device
 
-Mosaic saves Photos identifiers, file/folder bookmarks, filenames and basic metadata, collections, favorites, and playback positions in its application storage. Optional text recognition saves recognized text locally. Visual grouping saves small color/composition descriptors in a rebuildable cache. Normal iOS device backup rules apply to application metadata; caches are disposable.
+Mosaic saves Photos identifiers, file/folder bookmarks, filenames and basic metadata, collections, saved views, favorites, and playback positions in its application storage. Optional text recognition saves recognized text locally. Visual grouping saves small color/composition descriptors in a rebuildable cache. Normal iOS device backup rules apply to application metadata; caches are disposable.
 
 The metadata archive uses iOS file protection until the first device unlock after restart. File reads and organization reject paths that escape a connected folder through traversal or symbolic links.
 
