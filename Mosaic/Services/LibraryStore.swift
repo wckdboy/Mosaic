@@ -36,10 +36,14 @@ final class LibraryStore {
     // Stored rather than computed: views read this on every render, and rebuilding
     // a large library array per body evaluation is measurable during scrolling.
     private(set) var items: [MediaItem] = []
+    // O(1) lookup for creation projects, which reference stable identifiers and are
+    // rebuilt often while someone edits a collage. Rebuilt alongside `items`.
+    private(set) var itemLookup: [String: MediaItem] = [:]
     private func rebuildItems() {
         let source = photos + archive.files
         guard let names = archive.displayNames, !names.isEmpty else {
             items = source
+            itemLookup = Dictionary(source.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
             return
         }
         items = source.map { item in
@@ -49,6 +53,13 @@ final class LibraryStore {
             presented.name = name
             return presented
         }
+        itemLookup = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+    }
+
+    func item(_ id: String) -> MediaItem? { itemLookup[id] }
+
+    func items(for ids: [String]) -> [MediaItem] {
+        ids.compactMap { itemLookup[$0] }
     }
     var canUndoOrganization: Bool { archive.organizationUndo != nil }
     var favorites: Set<String> { archive.favorites }
@@ -110,34 +121,59 @@ final class LibraryStore {
         known.reserveCapacity(photos.count)
         for item in photos { known[item.id] = (item.modified, item.name) }
         let previous = known
-        let refreshed = await Task.detached(priority: .utility) {
-            let options = PHFetchOptions()
-            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            let assets = PHAsset.fetchAssets(with: options)
-            var result: [MediaItem] = []
-            result.reserveCapacity(assets.count)
-            assets.enumerateObjects { asset, _, _ in
-                guard asset.mediaType == .image || asset.mediaType == .video else { return }
-                let id = "photos:\(asset.localIdentifier)"
-                let name: String
-                if let cached = previous[id], cached.modified == asset.modificationDate {
-                    name = cached.name
-                } else {
-                    name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "Untitled"
+        // A 50k library can take a while to enumerate, especially the first time when
+        // every original filename requires a resource lookup. Stream batches so the
+        // gallery becomes useful while the rest is still being read.
+        let batches = AsyncStream<[MediaItem]> { continuation in
+            Task.detached(priority: .utility) {
+                let options = PHFetchOptions()
+                options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+                let assets = PHAsset.fetchAssets(with: options)
+                var batch: [MediaItem] = []
+                batch.reserveCapacity(1_000)
+                assets.enumerateObjects { asset, _, _ in
+                    guard asset.mediaType == .image || asset.mediaType == .video else { return }
+                    let id = "photos:\(asset.localIdentifier)"
+                    let name: String
+                    if let cached = previous[id], cached.modified == asset.modificationDate {
+                        name = cached.name
+                    } else {
+                        name =
+                            PHAssetResource.assetResources(for: asset).first?.originalFilename
+                            ?? "Untitled"
+                    }
+                    let kind: MediaItem.Kind =
+                        asset.mediaType == .video
+                        ? .video
+                        : asset.mediaSubtypes.contains(.photoLive)
+                            ? .livePhoto : MediaItem.kind(for: URL(fileURLWithPath: name)) ?? .photo
+                    batch.append(
+                        MediaItem(
+                            id: id, name: name, kind: kind,
+                            date: asset.creationDate ?? .distantPast, duration: asset.duration,
+                            width: asset.pixelWidth, height: asset.pixelHeight,
+                            modified: asset.modificationDate))
+                    if batch.count >= 1_000 {
+                        continuation.yield(batch)
+                        batch.removeAll(keepingCapacity: true)
+                    }
                 }
-                let kind: MediaItem.Kind =
-                    asset.mediaType == .video
-                    ? .video
-                    : asset.mediaSubtypes.contains(.photoLive)
-                        ? .livePhoto : MediaItem.kind(for: URL(fileURLWithPath: name)) ?? .photo
-                result.append(
-                    MediaItem(
-                        id: id, name: name, kind: kind,
-                        date: asset.creationDate ?? .distantPast, duration: asset.duration,
-                        width: asset.pixelWidth, height: asset.pixelHeight, modified: asset.modificationDate))
+                if !batch.isEmpty { continuation.yield(batch) }
+                continuation.finish()
             }
-            return result
-        }.value
+        }
+        var refreshed: [MediaItem] = []
+        refreshed.reserveCapacity(photos.count)
+        var lastPublish = ContinuousClock.now
+        for await batch in batches {
+            refreshed.append(contentsOf: batch)
+            // Throttle invalidation: a fast enumeration should not rebuild the gallery
+            // five hundred times while someone is already scrolling.
+            if ContinuousClock.now - lastPublish > .milliseconds(220) {
+                lastPublish = .now
+                photos = refreshed
+            }
+        }
         // Unchanged libraries must not invalidate every view observing items.
         if refreshed != photos {
             // Edited or deleted assets must not be served from stale cached objects.

@@ -110,7 +110,8 @@ struct MosaicView: View {
             if trail.isEmpty, let seed { trail = [seed] }
         }
         .task(id: projection) { await project() }
-        .task(id: SuggestionKey(revision: shownIndexRevision, active: searchFocused || !filter.query.isEmpty)) {
+        .task(id: SuggestionKey(revision: shownIndexRevision, active: searchFocused || !filter.query.isEmpty))
+        {
             guard searchFocused || !filter.query.isEmpty else { return }
             let visual = indexer.descriptors
             let result = await Task.detached(priority: .utility) { Self.topTags(visual) }.value
@@ -118,8 +119,9 @@ struct MosaicView: View {
         }
         .onChange(of: indexer.revision) { _, _ in
             // Apply automatically while the canvas has little analysis to disturb.
-            if shownAnalyzedCount == 0 || (focus != nil && indexer.descriptors[focus!.id] != nil
-                && clusters.first?.items.count ?? 0 <= 1)
+            if shownAnalyzedCount == 0
+                || (focus != nil && indexer.descriptors[focus!.id] != nil
+                    && clusters.first?.items.count ?? 0 <= 1)
             {
                 applyIndex()
             }
@@ -230,9 +232,12 @@ struct MosaicView: View {
     private var suggestionChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(Self.starterFilters + suggestions.filter { tag in
-                    !Self.starterFilters.contains { $0.lowercased() == tag.lowercased() }
-                }, id: \.self) { suggestion in
+                ForEach(
+                    Self.starterFilters
+                        + suggestions.filter { tag in
+                            !Self.starterFilters.contains { $0.lowercased() == tag.lowercased() }
+                        }, id: \.self
+                ) { suggestion in
                     let selected = filter.query.lowercased() == suggestion.lowercased()
                     Button {
                         filter.query = selected ? "" : suggestion.lowercased()
@@ -259,7 +264,8 @@ struct MosaicView: View {
     private var modeChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(focus == nil ? MosaicGrouping.allCases : [.similar, .color, .theme, .name]) { option in
+                ForEach(focus == nil ? MosaicGrouping.allCases : [.similar, .color, .theme, .name]) {
+                    option in
                     let selected = option == mode
                     Button {
                         if focus == nil { groupingRaw = option.rawValue } else { matchMode = option }
@@ -270,7 +276,9 @@ struct MosaicView: View {
                             .background(selected ? Color.primary : Color.primary.opacity(0.06), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(focus == nil ? "Group by \(option.rawValue)" : "Match by \(option.rawValue)")
+                    .accessibilityLabel(
+                        focus == nil ? "Group by \(option.rawValue)" : "Match by \(option.rawValue)"
+                    )
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
@@ -285,7 +293,8 @@ struct MosaicView: View {
 
     private var statusBadge: some View {
         IndexingBadge(
-            count: clusters.reduce(0) { $0 + $1.items.count }, analyzing: visualAnalysis, projecting: projecting
+            count: clusters.reduce(0) { $0 + $1.items.count }, analyzing: visualAnalysis,
+            projecting: projecting
         )
         .fixedSize()
         .layoutPriority(1)
@@ -426,12 +435,41 @@ struct MosaicView: View {
                 let ranked = search.rank(items, descriptors: visual, text: request.text)
                 var clusters: [MosaicCluster] = []
                 if !ranked.matches.isEmpty {
-                    clusters.append(MosaicCluster(id: "search-matches", title: "Best matches", items: ranked.matches))
+                    clusters.append(
+                        MosaicCluster(id: "search-matches", title: "Best matches", items: ranked.matches))
                 }
                 if !ranked.related.isEmpty {
-                    clusters.append(MosaicCluster(id: "search-related", title: "Related", items: ranked.related))
+                    clusters.append(
+                        MosaicCluster(id: "search-related", title: "Related", items: ranked.related))
                 }
                 return (clusters, Self.tints(clusters, visual))
+            }
+            // At library scale the Rust index performs the clustering pass. Small
+            // libraries keep the in-process Swift path, which avoids a sync round trip
+            // while the first descriptors are still arriving.
+            if request.focus == nil, visual.count >= 400, request.mode != .sentiment {
+                let mappedIDs = Set(items.map(\.id))
+                if let rust = try? await MosaicCoreStore.shared.clusters(
+                    mode: request.mode.rawValue.lowercased(), items: items,
+                    descriptors: visual, favorites: favorites,
+                    syncItems: request.items, ids: Array(mappedIDs))
+                {
+                    let lookup = Dictionary(
+                        items.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+                    let mapped = rust.compactMap { cluster -> MosaicCluster? in
+                        let members = cluster.itemIds.compactMap { lookup[$0] }
+                        guard !members.isEmpty else { return nil }
+                        // Keep the canvas's hue/brightness ordering inside an island;
+                        // Rust decides membership, Swift preserves the visual gradient.
+                        return MosaicCluster(
+                            id: cluster.id, title: cluster.title,
+                            items: MosaicClusterBuilder.sortedForGradient(
+                                members, descriptors: visual))
+                    }
+                    if !mapped.isEmpty {
+                        return (mapped, Self.tints(mapped, visual))
+                    }
+                }
             }
             let sentiments =
                 request.mode == .sentiment
@@ -440,7 +478,8 @@ struct MosaicView: View {
                 let matches = MosaicSimilarity.matches(
                     seed: reference, items: items, mode: request.mode, descriptors: visual,
                     sentiments: sentiments, continuing: true)
-                let cluster = MosaicCluster(id: "matches", title: "Related media", items: [reference] + matches)
+                let cluster = MosaicCluster(
+                    id: "matches", title: "Related media", items: [reference] + matches)
                 return ([cluster], Self.tints([cluster], visual))
             }
             let clusters = MosaicClusterBuilder.clusters(
@@ -489,8 +528,10 @@ extension MosaicView {
                 counts[MediaTheme.readable(label), default: 0] += 1
             }
         }
-        return counts.filter { $0.value >= 3 }.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
-            .prefix(limit).map(\.key)
+        return counts.filter { $0.value >= 3 }.sorted {
+            $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+        }
+        .prefix(limit).map(\.key)
     }
 
     // Dominant colors paint placeholders so tiles never flash empty while decoding.

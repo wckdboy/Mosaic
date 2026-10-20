@@ -84,6 +84,15 @@ struct SettingsView: View {
                             Text(MosaicIndexer.shared.progress.formatted(.percent.precision(.fractionLength(0))))
                                 .monospacedDigit()
                         }
+                        if MosaicIndexer.shared.itemsPerMinute > 0 {
+                            LabeledContent("Throughput") {
+                                Text("\(MosaicIndexer.shared.itemsPerMinute.formatted()) items/min")
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    LabeledContent("Similarity engine") {
+                        Text("Rust \(MosaicCoreBridge.version)").foregroundStyle(.secondary)
                     }
                     if visualAnalysis {
                         Toggle("Detailed descriptions", isOn: $detailedDescriptions)

@@ -39,7 +39,7 @@ import XCTest
     }
     func testNavigationAndDiscoveryRoundTrip() throws {
         launch()
-        XCTAssertEqual(app.tabBars.buttons.count, 2)
+        XCTAssertEqual(app.tabBars.buttons.count, 3)
         app.buttons["media-fixture:0"].tap()
         XCTAssertTrue(app.staticTexts["viewer.filename"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["viewer.filename"].value as? String, "Study_001.jpg")
@@ -305,5 +305,48 @@ import XCTest
                 && app.windows.firstMatch.frame.contains(frame)
                 && frame.maxY < app.buttons["Organize 60 items"].frame.minY
         }
+    }
+
+    // Create must stay reachable without leaving the library, and each studio must
+    // produce a usable layout from the first launch without a Photos grant.
+    func testCreateCollagePhotobookAndSmartPicks() throws {
+        launch()
+        let createTab = app.tabBars.buttons["Create"]
+        print("CREATE-TAB frame=\(createTab.frame) hittable=\(createTab.isHittable)")
+        createTab.tap()
+        sleep(5)
+        print("CREATE-HIERARCHY\n\(app.debugDescription)")
+        capture("Create after tap")
+        XCTAssertTrue(app.staticTexts["Your photos, composed."].waitForExistence(timeout: 10))
+        capture("Create launchpad")
+
+        app.buttons["create.collage"].tap()
+        XCTAssertTrue(app.buttons["collage.share"].waitForExistence(timeout: 10))
+        let share = app.buttons["collage.share"]
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: share)
+        waitForExpectations(timeout: 20)
+        capture("Collage studio")
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(app.buttons["create.photobook"].waitForExistence(timeout: 5))
+        app.buttons["create.photobook"].tap()
+        XCTAssertTrue(app.buttons["book.curate"].waitForExistence(timeout: 10))
+        let curate = app.buttons["book.curate"]
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: curate)
+        waitForExpectations(timeout: 20)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'pages'")).firstMatch.waitForExistence(timeout: 15))
+        capture("Photobook studio")
+        app.buttons["Done"].tap()
+
+        app.buttons["create.smartPicks"].tap()
+        XCTAssertTrue(app.staticTexts["A book needs a point of view."].waitForExistence(timeout: 5))
+        let photobookAction = app.buttons["Photobook"].firstMatch
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: photobookAction)
+        waitForExpectations(timeout: 20)
+        capture("Smart picks")
+        photobookAction.tap()
+        XCTAssertTrue(app.buttons["book.curate"].waitForExistence(timeout: 10))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["create.collage"].waitForExistence(timeout: 5))
     }
 }

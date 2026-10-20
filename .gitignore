@@ -18,3 +18,8 @@ xcuserdata/
 *.cer
 *.mobileprovision
 *.provisionprofile
+
+# Rust build products and the generated static library. Run
+# scripts/build-rust-core.sh (or build in Xcode) to recreate it.
+rust/target/
+Frameworks/

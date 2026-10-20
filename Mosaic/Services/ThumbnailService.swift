@@ -96,7 +96,7 @@ private final class VideoThumbnailRequest: @unchecked Sendable {
 
 @MainActor final class PhotoThumbnailRequest {
     // PHCachingImageManager is thread-safe; prefetching runs off the main actor.
-    nonisolated(unsafe) static let manager = PHCachingImageManager()
+    nonisolated static let manager = PHCachingImageManager()
     private var request: PHImageRequestID?
     private var generation = UUID()
     func load(_ item: MediaItem, pixels: Int, completion: @escaping (UIImage?) -> Void) {

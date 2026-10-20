@@ -9,11 +9,13 @@ import SwiftUI
         #endif
         return LibraryStore()
     }()
+    @State private var creations = CreationStore()
     @AppStorage("appearance") private var appearance = "system"
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(store)
+                .environment(creations)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 .task { await store.start() }
                 .onOpenURL { url in Task { await store.openFiles([url]) } }

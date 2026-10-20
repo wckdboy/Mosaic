@@ -37,6 +37,7 @@ struct LibraryView: View {
 // Only visible cells decode thumbnails; filtering never touches the media bytes.
 struct MediaBrowser: View {
     @Environment(LibraryStore.self) private var store
+    @Environment(CreationStore.self) private var creations
     let title: String
     let items: [MediaItem]
     var showsOverview = false
@@ -54,6 +55,8 @@ struct MediaBrowser: View {
     @State private var organize = false
     @State private var autoOrganize = false
     @State private var similar: MediaItem?
+    @State private var creation: CreationProject?
+    @State private var smartPicks = false
     @State private var importing = false
     @State private var visibleItems: [MediaItem] = []
     @State private var groups: [DayGroup] = []
@@ -130,6 +133,8 @@ struct MediaBrowser: View {
                     Picker("Grid", selection: $columns) {
                         ForEach(2...5, id: \.self) { Text("\($0) columns").tag($0) }
                     }
+                    Button("Smart picks", systemImage: "wand.and.stars") { smartPicks = true }
+                        .disabled(items.isEmpty)
                     Button("Open files", systemImage: "folder.badge.plus") { importing = true }
                     if !store.hasPhotoAccess {
                         Button("Connect Photos", systemImage: "photo.badge.plus") {
@@ -192,6 +197,21 @@ struct MediaBrowser: View {
             MediaViewer(items: route.items, initialID: route.selectedID)
         }
         .fullScreenCover(item: $similar) { SimilarMediaView(seed: $0) }
+        .fullScreenCover(item: $creation) { project in
+            if project.kind == .collage {
+                CollageStudioView(project: project)
+            } else {
+                BookStudioView(project: project)
+            }
+        }
+        .fullScreenCover(isPresented: $smartPicks) {
+            SmartPicksView(source: items) { kind, picked in
+                creation =
+                    kind == .collage
+                    ? .collage(itemIDs: picked.map(\.id))
+                    : .photobook(itemIDs: picked.map(\.id))
+            }
+        }
         .fullScreenCover(isPresented: $autoOrganize) {
             AutoOrganizeView(selectedIDs: selecting ? selection : Set(items.map(\.id)))
         }
@@ -265,6 +285,12 @@ struct MediaBrowser: View {
                                         {
                                             selection = [item.id]
                                             organize = true
+                                        }
+                                        Button("Make a collage", systemImage: "square.on.square.dashed") {
+                                            creation = .collage(itemIDs: selection.isEmpty ? [item.id] : Array(selection))
+                                        }
+                                        Button("Make a photobook", systemImage: "book.closed") {
+                                            creation = .photobook(itemIDs: selection.isEmpty ? [item.id] : Array(selection))
                                         }
                                         if let collection {
                                             Button("Remove from collection", systemImage: "minus.circle") {
@@ -381,6 +407,11 @@ struct MediaBrowser: View {
             .background(kind == value ? Color.primary : Color.primary.opacity(0.055), in: Capsule())
         }.buttonStyle(.plain).accessibilityAddTraits(kind == value ? .isSelected : [])
     }
+    private func openCreation(_ kind: CreationProject.Kind) {
+        let ids = selection.isEmpty ? visibleItems.map(\.id) : Array(selection)
+        creation = kind == .collage ? .collage(itemIDs: ids) : .photobook(itemIDs: ids)
+    }
+
     private func open(_ item: MediaItem) {
         if selecting {
             if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }

@@ -4,18 +4,23 @@
 
 **A quieter home for your photos, GIFs, and films.**
 
-Native iPhone and iPad media browsing, organization, and playback.<br>
+Native iPhone and iPad browsing, organization, playback, collages, and photobooks.<br>
 Local first. Open source. No Mosaic account.
 
 <img src="docs/mosaic-icon.svg" width="96" alt="Mosaic five-tile icon">
 
-[Getting started](#getting-started) · [What works](#what-works) · [Cloud storage](#cloud-storage) · [Development](#development) · [Roadmap](ROADMAP.md) · [Privacy](PRIVACY.md)
+[Getting started](#getting-started) · [What works](#what-works) · [Create](#create) · [Cloud storage](#cloud-storage) · [Development](#development) · [Roadmap](ROADMAP.md) · [Privacy](PRIVACY.md)
 
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/mosaic.png" width="260" alt="Mosaic canvas with quiet search and two navigation destinations">
+  <img src="docs/screenshots/mosaic.png" width="260" alt="Mosaic canvas with quiet search">
   <img src="docs/screenshots/similar.png" width="260" alt="Related photos found from a video reference">
+</p>
+<p align="center">
+  <img src="docs/screenshots/create.png" width="260" alt="Create launchpad with collage, photobook, and smart picks">
+  <img src="docs/screenshots/collage.png" width="260" alt="Collage studio with an asymmetric mosaic layout">
+  <img src="docs/screenshots/photobook.png" width="260" alt="Photobook studio showing a cover and page strip">
 </p>
 
 Screenshots use simulator sample media. No sample media ships with the app.
@@ -32,7 +37,7 @@ Screenshots use simulator sample media. No sample media ships with the app.
 
 ### Mosaic canvas
 
-Choose the **Mosaic button in Library**. Library and Collections are the two main destinations; Files and cloud sources live in Settings → Connections.
+Choose the **Mosaic button in Library**. Library, Create, and Collections are the three main destinations; Files and cloud sources live in Settings → Connections.
 
 A free-panning, zoomable two-dimensional canvas arranges media as islands grouped by **color**, **theme**, **visual similarity**, **name**, or **text sentiment**. Islands are packed into a roughly square world and color islands follow the color wheel, so you can pan in any direction. Pinch or use the zoom controls; zoom out far enough and **every item in the library fits on screen** as a pre-rendered map of tiny thumbnails (tap anywhere on it to dive back in). Search ranks results instead of merely filtering them: **Best matches** contain every search word in an item's precise tags, scene labels, caption, recognized text, color, filename, or year (plurals included, so "women" finds "woman"); **Related** lists media that are conceptually close (on-device word embeddings), so ideas like "ocean", "meal", or "celebration" find beaches, dinners, and birthdays. While the search field is active, smart filter chips offer People, Animals, Food, Nature, Night, Documents, and Videos plus the most common tags in your own library. Narrow further by media type, favorites, or source.
 
@@ -40,13 +45,28 @@ A free-panning, zoomable two-dimensional canvas arranges media as islands groupe
 
 The canvas recycles cells in both axes. Geometry is computed once per content change in unscaled coordinates with a spatial hash; zooming only rescales the queried region, so pinching costs work proportional to visible tiles. Below about a third of full size, live cells are replaced by a single bitmap of the whole world (colors first, then tiny thumbnails, capped at 2048 px and rendered once per layout), so the zoomed-out overview is a texture rather than thousands of views. Photos thumbnails for upcoming tiles are prefetched, tiles request resolution appropriate to the zoom level, and analyzed dominant colors paint placeholders before pixels arrive.
 
-Analysis runs on-device in the background whenever **Analyze photos on this iPhone** is on (Settings), newest first. It is deliberately gentle to avoid warming the phone: one item at a time on battery (two while charging), slower in Low Power Mode or when the device is warm, fully paused while you view photos or videos, when the device is hot, or when Mosaic leaves the foreground. Results are published in batches and the cache is checkpointed about once a minute. Each item gets a dominant color palette, Apple Vision scene labels mapped to themes, and a Vision feature print for semantic similarity, all computed from ~300 px thumbnails. Photos requests never download iCloud originals, and cloud-only Files are skipped. Descriptors are cached on disk and checkpointed. When new analysis is ready, a **New matches ready** pill offers to refresh rather than rearranging tiles under your finger. Vision scene and feature models require a physical device; on Simulator, color and composition analysis still work.
+Analysis runs on-device in the background whenever **Analyze photos on this iPhone** is on (Settings), newest first. Three workers run on battery and six while charging, slower in Low Power Mode, and fully paused while you view photos or videos, when the device is warm, or when Mosaic leaves the foreground. Results are published in batches, the cache is checkpointed every ten minutes, and Settings shows measured throughput so a large pass is legible. Each item gets a dominant color palette, Apple Vision scene labels mapped to themes, and a Vision feature print for semantic similarity, all computed from ~300 px thumbnails. Photos requests never download iCloud originals, and cloud-only Files are skipped. Vision scene and feature models require a physical device; on Simulator, color and composition analysis still work.
+
+**Built for large libraries.** The Rust engine keeps a projected 192-byte visual signature per item and answers similarity, clustering, duplicate, and curation queries over 50,000 photos in milliseconds. A 50,000-item synthetic library indexes in about 0.4 seconds and answers a top-200 visual query in about 17 ms on an Apple-silicon Mac; clustering is a few milliseconds and selecting an 80-photo book takes about 50 ms. On device the same engine runs locally, and the incremental index is updated only for descriptors that changed. The first pass still depends on Vision and thumbnail decoding, which is why the workers and thermal pacing matter; the engine removes the quadratic search work that would otherwise grow with the library.
 
 The crosshair button re-frames the reference while exploring, and in the overview brings your last selection back into view with a brief pulse.
 
-**Precise tagging (Apple Intelligence).** On devices with Apple Intelligence, a second background pass shows each thumbnail to Apple's on-device Foundation Model and stores a one-line caption plus tags for objects, people (described generically, such as woman, man, child, or group), activities, places, and ideas. It runs one item at a time after the fast pass, only while the device is cool and not in Low Power Mode, much faster while charging, and the item you tap is described immediately. It can be turned off in Settings (**Detailed descriptions**). Elsewhere, search uses the fast tier: Vision scene labels, people counts, colors, and text.
+**Precise tagging (Apple Intelligence).** On devices with Apple Intelligence, a second background pass shows each thumbnail to Apple's on-device Foundation Model and stores a one-line caption plus tags for objects, people (described generically, such as woman, man, child, or group), activities, places, and ideas. It runs one item at a time after the fast pass, only while the device is cool and not in Low Power Mode, much faster while charging, and the item you tap is described immediately. The precise pass is bounded to the most recent 4,000 photos so a 50,000-photo library does not spend days in it; the fast tier still covers everything. It can be turned off in Settings (**Detailed descriptions**). Elsewhere, search uses the fast tier: Vision scene labels, people counts, colors, and text.
 
 Similarity is visual and semantic resemblance, not face identification. Sentiment uses filenames and optional recognized text; it does **not** infer anyone’s emotions. Items that have not been analyzed remain visible in **Not analyzed**, and are never presented as visual matches.
+
+### Create
+
+**Create** is the third destination. It holds three ways to turn a library into something to keep, without leaving the browsing app for a separate editor.
+
+- **Smart picks** ranks the library by sharpness, favorites, recency, and visual/theme variety, suppresses near-duplicate bursts, and shows why each photo was chosen. It can hand the same selection to a collage or a book.
+- **Collage** offers eight composition styles—Mosaic, Grid, Hero, Editorial, Filmstrip, Scatter, Stack, and Triptych—plus square, portrait, story, landscape, and 5:7 canvases. Adjust spacing, margin, corner radius, background, and optional date captions. Every style is aspect-aware and deterministic for a given seed.
+- **Photobook** groups photos into events by capture-time gaps, gives each event a quiet opening, and paginates with a varied rhythm of full-page, two-up, three-up, and mosaic spreads. Choose A4 portrait/landscape, square, or Letter; toggle facing-page spreads and a cover; set a title and subtitle.
+- **Export** renders a print-sized collage image or a multi-page PDF on device and opens the system share sheet. Exported pages use the same normalized geometry as the preview.
+
+Creations are stored as small recipes (stable media identifiers, style, seed, and finish) in Application Support, not as copies of the media. Reopening a project rebuilds it from the current library; missing items leave a calm blank rather than breaking the layout. Projects can be duplicated or deleted from **Create → Recent**.
+
+Collage and photobook projects can also be started from Library: select items and choose **Make a collage** or **Make a photobook**, or use the context menu on a single item. Selection preserves the order you tap, which matters for Hero, Scatter, Stack, and story-led books.
 
 ### Auto organization
 
@@ -96,12 +116,14 @@ Customization, connections, permissions, AI, playback preferences, and technical
 ## Getting started
 
 1. Open `Mosaic.xcodeproj` with **Xcode 27 or later**.
-2. Select the shared **Mosaic** scheme and an iPhone or iPad simulator.
-3. Build and run. The app targets **iOS/iPadOS 26+**.
-4. On a physical device, choose your own signing team and a unique bundle identifier.
-5. Connect Photos, open individual files, or use **Settings → Connections → Folders & discovery** to select a folder.
+2. Install Rust from [rustup.rs](https://rustup.rs) and add the iOS targets:
+   `rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`.
+3. Select the shared **Mosaic** scheme and an iPhone or iPad simulator. The **Build Rust core** phase compiles the engine automatically.
+4. Build and run. The app targets **iOS/iPadOS 26+**.
+5. On a physical device, choose your own signing team and a unique bundle identifier.
+6. Connect Photos, open individual files, or use **Settings → Connections → Folders & discovery** to select a folder.
 
-There are no external package dependencies or backend services to configure.
+The app has no third-party Swift packages and no Mosaic account or backend service. The only build-time dependency is the Rust toolchain used for the local engine.
 
 ### Discovery on iOS
 
@@ -138,16 +160,19 @@ Use the bucket’s correct regional endpoint. Expired session credentials requir
 
 ```text
 Mosaic/
-  Models/        Stable references, archives, grouping, subtitle parsing
-  Services/      PhotoKit, persistence, file access, discovery, playback, S3, analysis
-  Components/    Reusable thumbnails, native media surfaces, recycled canvas
-  Features/      Library, Mosaic, collections, batch organization, viewer, settings
+  Models/        Stable references, archives, grouping, creations, subtitle parsing
+  Services/      PhotoKit, persistence, discovery, playback, S3, analysis,
+                 Rust bridge, smart selection, collage/book export
+  Components/    Thumbnails, native media surfaces, recycled canvas, creation previews
+  Features/      Library, Mosaic, Create, collage, photobook, smart picks,
+                 collections, batch organization, viewer, settings
   Theme/         Neutral surfaces and restrained glass controls
-MosaicTests/     Persistence, format classification, S3 signing, discovery,
-                 subtitle parsing, grouping, rename/move/Undo recovery, security regressions,
-                 and large-library clock/memory benchmarks
+rust/            Rust engine: similarity index, curation, layouts, photobook planner,
+                 duplicate discovery, C ABI, and a 50k-item benchmark CLI
+MosaicTests/     Persistence, formats, S3 signing, discovery, grouping, creation
+                 recipes, Rust bridge, layout/export, rename/move/Undo, benchmarks
 MosaicUITests/   Isolated UI journeys, accessibility audits, and screenshot attachments
-scripts/         Synthetic media fixtures and reproducible vector icon rendering
+scripts/         Rust build phase, synthetic media fixtures, vector icon rendering
 ```
 
 ### Architecture and performance
@@ -156,9 +181,23 @@ scripts/         Synthetic media fixtures and reproducible vector icon rendering
 
 Photos thumbnails use `PHCachingImageManager`; file thumbnails use downsampling and a 64 MB cost-bounded cache, with at most three concurrent decodes. Grid work is lazy. Viewer images are bounded to display-oriented resolutions, while videos use native streaming/decoding. Cancellation and identity checks prevent old requests from painting reused cells or replacing newer viewer state. Folder discovery reads metadata on an actor and preserves previous results if a provider is unavailable.
 
-`MosaicCanvasLayout` caches unscaled geometry and uses a spatial hash to return only visible tiles; zoom rescales lazily per query. Similar grouping compares against at most 40 representatives, avoiding an all-pairs quadratic comparison; feature prints are stored as L2-normalized Int8 vectors so similarity is a dot product. Analysis is off the UI actor and cached. This is an implementation strategy, **not yet a measured frame-rate guarantee** for large real-world libraries.
+`MosaicCanvasLayout` caches unscaled geometry and uses a spatial hash to return only visible tiles; zoom rescales lazily per query. Analysis is off the UI actor and cached.
+
+`MosaicCore` (Rust, `rust/mosaic-core`) owns the work that grows with library size. Vision feature prints and word vectors are projected once into compact Int8 signatures with deterministic sparse random projection. Similarity search is a parallel dot product; near-duplicate and similarity grouping use four 16-bit locality-sensitive bands so candidate lists stay tiny; curation is a quality-weighted maximal-marginal-relevance pass with burst suppression; collage and photobook layouts are pure geometry. The Swift bridge speaks a small JSON C ABI, and the Xcode **Build Rust core** phase compiles the static library for the active iOS platform. The engine is incremental: upserts replace one signature, and the Swift coordinator fingerprints descriptors so an unchanged 50k library costs one dictionary scan. The canvas uses the Rust clusterer once a library has at least 400 analyzed items and falls back to the in-process Swift clusterer while the first descriptors arrive. This is an implementation strategy, **not yet a measured frame-rate guarantee** for every real-world library; see the scale notes below.
 
 Comments describe ownership, cancellation, scope lifetimes, and algorithm choices. Keep those contracts intact when extending the app. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Rust engine
+
+The Rust toolchain is required to build Mosaic from source. Xcode runs `scripts/build-rust-core.sh` before compiling Swift; it builds a static library for the active simulator or device and places it in `Frameworks/$(PLATFORM_NAME)`, which `LIBRARY_SEARCH_PATHS` already points at.
+
+```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+cargo test --manifest-path rust/Cargo.toml --workspace
+cargo run --release --manifest-path rust/Cargo.toml -p mosaic-cli -- scale 50000
+```
+
+The scale command generates a synthetic 50k library, indexes it, and times query, selection, clustering, duplicates, and stats. The Rust unit tests cover rectangle invariants, deterministic layouts, photobook coverage, index updates, duplicate bursts, and deterministic clustering. Swift tests exercise the C ABI end to end with temporary images, including collage and PDF export.
 
 ### Tests
 
@@ -173,7 +212,7 @@ xcodebuild test \
 
 Choose an installed simulator name if yours differs. Tests use temporary files and AWS’s public signing example; they do not contact a cloud service or require credentials.
 
-UI tests launch with `--ui-testing`, generating 60 procedural images in a separate temporary archive. This fixture is compiled only in Debug builds, resets on launch, and never requests Photos or provider access. Tests exercise discovery round trips, batch preview/apply/Undo, horizontal gallery transitions, light/dark accessibility semantics and hit regions, and the largest accessibility text size. Screenshots are retained in the Xcode test result.
+UI tests launch with `--ui-testing`, generating 60 procedural images in a separate temporary archive. The Create journey covers the launchpad, collage studio, photobook studio, and smart picks without a Photos grant. This fixture is compiled only in Debug builds, resets on launch, and never requests Photos or provider access. Tests exercise discovery round trips, batch preview/apply/Undo, horizontal gallery transitions, light/dark accessibility semantics and hit regions, and the largest accessibility text size. Screenshots are retained in the Xcode test result.
 
 The iOS 27 text-clipping audit falsely flags the native **Insert field** menu label at XXXL. A screenshot/hierarchy review verified the full label; the test excludes only that issue while also requiring the control to be hittable and fully above the pinned action button. Other clipping and description failures remain failures.
 

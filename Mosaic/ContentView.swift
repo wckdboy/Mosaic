@@ -27,6 +27,7 @@ struct ContentView: View {
         @Bindable var store = store
         TabView {
             Tab("Library", systemImage: "square.grid.2x2") { LibraryView() }
+            Tab("Create", systemImage: "sparkles") { CreateView() }
             Tab("Collections", systemImage: "rectangle.stack") { CollectionsView() }
         }
         .disabled(!store.isReady)
@@ -49,7 +50,8 @@ struct ContentView: View {
         .task(id: indexTrigger) {
             let trigger = indexTrigger
             await MosaicIndexer.shared.update(
-                items: store.items, enabled: trigger.enabled && trigger.active, describe: trigger.describe)
+                items: store.items, favorites: store.favorites,
+                enabled: trigger.enabled && trigger.active, describe: trigger.describe)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

@@ -4,12 +4,35 @@ An evolving record of product ideas and release work. These are **proposals, not
 
 ## Design principles
 
-- Keep Library and Collections as the main destinations. Add capabilities through contextual actions and Settings before adding navigation.
+- Keep Library, Create, and Collections as the main destinations. Add capabilities through contextual actions and Settings before adding navigation.
 - Give media the space. Use progressive disclosure, clear icons with accessible labels, and short, useful copy.
 - Preserve the browsing position when opening media, exploring similarities, changing filters, or returning from a task.
 - Make expensive work incremental, cancellable, and bounded. Measure memory, scrolling, battery use, and thermal behavior on devices.
 - Keep analysis local by default and optional. Any future remote AI needs explicit opt-in and a clear description of what leaves the device.
 - Discover only media the user has authorized. Physical renames and moves remain an explicit choice with exact previews, collision protection, and recovery/Undo.
+
+## Shipped foundation
+
+These are implemented and documented in the README; the roadmap keeps the *next* work separate.
+
+| ID | Work | State |
+| --- | --- | --- |
+| S1 | Rust engine for similarity, clustering, duplicates, curation, and layout | Collage, photobook, smart picks, and the canvas at library scale use `rust/mosaic-core` through a JSON C ABI. 50k-item benchmark is part of the repo. |
+| S2 | Create destination | Collage studio, photobook studio, smart picks, saved recipes, high-resolution image export, and multi-page PDF export. |
+| S3 | Large-library indexing | Three workers on battery, six while charging, thermal pauses, measured throughput, 10-minute cache checkpoints, and incremental Rust index updates. |
+| S4 | Project recipes | Creations persist stable identifiers, style, seed, and finish; geometry is rebuilt from the current library. |
+
+### Next on the create surface
+
+| ID | Work | Scope |
+| --- | --- | --- |
+| C1 | Real print ordering | A print-provider integration with size, paper, shipping, and price previews. Keep the local PDF/share path working without an account. |
+| C2 | Per-cell crop and focus | Let someone drag a photo inside its cell and persist a focal point. The Rust cells already carry normalized focus coordinates. |
+| C3 | Text and page furniture | Optional page titles, dates, captions, and end pages with editable typography. Keep text out of the collage canvas by default. |
+| C4 | Collage templates from a photo | Suggest a layout based on dominant colors, orientation, and faces present. Do not identify people. |
+| C5 | Book proofing | Spread-level review with crop warnings, low-resolution badges, duplicate warnings, and a printable contact sheet before export. |
+| C6 | Chapter editing | Rename, split, merge, or reorder detected events; pin an event to a page range. |
+| C7 | Export presets | Bleed, safe margins, CMYK-aware PDF, and per-provider page sizes. Measure file size and color conversion on device. |
 
 ## First: release confidence
 
@@ -22,6 +45,8 @@ These checks take priority over expanding the feature list.
 | Q3 | Playback compatibility | A reusable media corpus covering containers, codecs, HDR, RAW, animations, subtitles, damaged files, track changes, seeking, Bluetooth, AirPlay, and Picture in Picture. Publish observed support and limitations. |
 | Q4 | Accessibility and interaction | Physical-device VoiceOver, larger text, Reduce Motion, increased contrast, light/dark appearance, rotation, iPad layouts, and repeated gallery/canvas/viewer transitions. |
 | Q5 | Repeatable release checks | CI build/tests with retained results; archive migration/recovery checks; dependency/license review when adding packages; a focused security review of provider access, credentials, parsers, and original-file operations. |
+| Q6 | Print and export fidelity | Verify collage and PDF exports at 100% on a calibrated display and a physical print. Check rounded corners, focal crops, page bleed, text, color profiles, memory, and cancellation on large books. |
+| Q7 | 50k-library device pass | Measure first enumeration, thumbnail analysis throughput, thermal state, battery, memory, and foreground responsiveness on older and newer iPhones and iPads with 50,000+ photos. Establish a budget for the Rust index and cache checkpoint. |
 
 ## Next candidates
 
@@ -47,7 +72,7 @@ A quiet, opt-in place to review suggested naming and grouping batches. Surface a
 
 | ID | Idea | Scope and requirements |
 | --- | --- | --- |
-| F3 | Duplicate review | Distinguish byte-identical files from visually similar media. Compare side by side with size, resolution, and source; let the user choose what to keep. Hash originals incrementally only with authorized access and an explicit download policy. Any deletion needs its own recovery and confirmation design. |
+| F3 | Duplicate review | The Rust engine already finds visual duplicate groups and smart picks suppress bursts. A review surface still needs side-by-side comparison with size, resolution, and source, an explicit keep/remove choice, recovery, and confirmation. Hash originals incrementally only with authorized access and an explicit download policy. Any deletion needs its own recovery and confirmation design. |
 | F4 | Reusable organization recipes | Save naming patterns, collection rules, and optional folder destinations. Start with user-triggered dry runs using the existing move journal and Undo. Consider scheduled suggestions only after provider interruption/recovery is proven. |
 | F5 | Tags and ratings | Fast contextual tagging and batch edits; expose criteria through lenses. Keep Mosaic metadata separate from embedded-file metadata unless the user explicitly chooses to write originals. |
 | F6 | Offline selections | Pin chosen media for offline viewing with a visible storage budget, Wi-Fi preference, progress, cancellation, and eviction controls. Handle revoked access and provider limitations; avoid silently downloading whole libraries. |

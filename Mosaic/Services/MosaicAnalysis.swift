@@ -43,6 +43,10 @@ actor MosaicAnalysis {
         store(descriptor, for: item.id)
         return descriptor
     }
+    // Encoding a 50k-item cache can allocate ~100 MB. Keep the encode on the
+    // analysis actor (so a snapshot is not copied) but move the disk write off it.
+    // This avoids stalling the next analysis batch while the flash is written.
+    private var saveTask: Task<Void, Never>?
     func save() {
         guard dirty else { return }
         do {
@@ -50,13 +54,25 @@ actor MosaicAnalysis {
                 at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let encoder = PropertyListEncoder()
             encoder.outputFormat = .binary
-            try encoder.encode(cache).write(to: cacheURL, options: .atomic)
+            let data = try encoder.encode(cache)
             dirty = false
+            let url = cacheURL
+            let previous = saveTask
+            saveTask = Task.detached(priority: .utility) {
+                await previous?.value
+                guard !Task.isCancelled else { return }
+                do { try data.write(to: url, options: .atomic) } catch {
+                    // This is a rebuildable cache, not user-authored organization.
+                }
+            }
         } catch {
             // This is a rebuildable cache, not user-authored organization.
         }
     }
-    func clear() {
+    func clear() async {
+        saveTask?.cancel()
+        await saveTask?.value
+        saveTask = nil
         cache = [:]
         dirty = false
         try? FileManager.default.removeItem(at: cacheURL)
@@ -73,7 +89,8 @@ actor MosaicAnalysis {
         descriptor.theme = MediaTheme.theme(for: vision.labels)
         descriptor.feature = vision.feature
         descriptor.people = vision.people
-        descriptor.meaning = MediaSemantics.vector(for: vision.labels.flatMap { MediaSemantics.words(MediaTheme.readable($0.identifier)) })
+        descriptor.meaning = MediaSemantics.vector(
+            for: vision.labels.flatMap { MediaSemantics.words(MediaTheme.readable($0.identifier)) })
         // Vision can fail transiently (memory pressure) or entirely (simulators). Keep
         // the color result, but leave the entry stale so a later pass retries it.
         if vision.feature == nil { descriptor.version = 1 }
@@ -87,8 +104,11 @@ actor MosaicAnalysis {
         case noImage
         case modelFailed
     }
-    @concurrent static func detail(_ item: MediaItem, base: VisualDescriptor, allowFileRead: Bool) async -> Detail {
-        guard !Task.isCancelled, let image = await thumbnail(for: item, allowFileRead: allowFileRead, side: 448)
+    @concurrent static func detail(_ item: MediaItem, base: VisualDescriptor, allowFileRead: Bool) async
+        -> Detail
+    {
+        guard !Task.isCancelled,
+            let image = await thumbnail(for: item, allowFileRead: allowFileRead, side: 448)
         else { return .noImage }
         guard let description = await MediaDescriber.describe(image) else { return .modelFailed }
         var descriptor = base
@@ -153,7 +173,9 @@ actor MosaicAnalysis {
         humans.upperBodyOnly = false
         try? handler.perform([classify])
         try? handler.perform([print])
-        let people = (try? handler.perform([humans])) != nil ? humans.results?.filter { $0.confidence > 0.5 }.count : nil
+        let people =
+            (try? handler.perform([humans])) != nil
+            ? humans.results?.filter { $0.confidence > 0.5 }.count : nil
         let labels = (classify.results ?? [])
             .filter { $0.confidence >= 0.15 }
             .sorted { $0.confidence > $1.confidence }
@@ -217,7 +239,10 @@ actor MosaicAnalysis {
         let ranked = weight.indices.filter { weight[$0] > 0 }.sorted { weight[$0] > weight[$1] }
         guard total > 0, let top = ranked.first else { return nil }
         func swatch(_ bucket: Int) -> (r: Float, g: Float, b: Float) {
-            (sums[bucket].r / weight[bucket], sums[bucket].g / weight[bucket], sums[bucket].b / weight[bucket])
+            (
+                sums[bucket].r / weight[bucket], sums[bucket].g / weight[bucket],
+                sums[bucket].b / weight[bucket]
+            )
         }
         let palette = ranked.prefix(3).filter { $0 == top || weight[$0] >= total * 0.08 }.map { bucket in
             let color = swatch(bucket)
@@ -309,6 +334,13 @@ final class MosaicIndexer {
     private(set) var describing = false
     private(set) var described = 0
     private(set) var describable = 0
+    // Measured throughput makes large-library progress legible in Settings and helps
+    // verify that indexing is actually using the available cores.
+    private(set) var itemsPerMinute = 0
+    @ObservationIgnored private var favorites: Set<String> = []
+    @ObservationIgnored private var analyzedThisWindow = 0
+    @ObservationIgnored private var windowStart = ContinuousClock.now
+    @ObservationIgnored private var coreSyncTask: Task<Void, Never>?
     @ObservationIgnored private var describeEnabled = true
     @ObservationIgnored private var detailAttempted: Set<String> = []
     @ObservationIgnored private lazy var describerAvailable = MediaDescriber.isAvailable
@@ -322,14 +354,22 @@ final class MosaicIndexer {
         revision += 1
     }
 
-    func update(items: [MediaItem], enabled: Bool, describe: Bool = true) async {
+    func update(
+        items: [MediaItem], favorites: Set<String> = [], enabled: Bool, describe: Bool = true
+    ) async {
         await loadCache()
         self.items = items
+        self.favorites = favorites
         describeEnabled = describe
         guard enabled else {
             stop()
             return
         }
+        // Sync the currently known cache before analysis resumes. After this point
+        // publishes travel through the incremental descriptor path, so a long
+        // background sync can never copy the full 50k descriptor dictionary.
+        await MosaicCoreStore.shared.sync(
+            items: items, descriptors: descriptors, favorites: favorites)
         restart()
     }
 
@@ -359,7 +399,9 @@ final class MosaicIndexer {
 
     private func describeNow(_ item: MediaItem, base: VisualDescriptor, allowFileRead: Bool) async {
         detailAttempted.insert(item.id)
-        guard case .described(let detailed) = await MosaicAnalysis.detail(item, base: base, allowFileRead: allowFileRead)
+        guard
+            case .described(let detailed) = await MosaicAnalysis.detail(
+                item, base: base, allowFileRead: allowFileRead)
         else { return }
         unpublished[item.id] = detailed
         await MosaicAnalysis.shared.store(detailed, for: item.id)
@@ -378,7 +420,10 @@ final class MosaicIndexer {
 
     func reset() async {
         stop()
+        coreSyncTask?.cancel()
+        coreSyncTask = nil
         await MosaicAnalysis.shared.clear()
+        await MosaicCoreStore.shared.clear()
         descriptors = [:]
         unpublished = [:]
         attempted = []
@@ -387,9 +432,26 @@ final class MosaicIndexer {
 
     private func publish() {
         guard !unpublished.isEmpty else { return }
-        descriptors.merge(unpublished) { _, new in new }
+        let changed = unpublished
+        analyzedThisWindow += changed.count
+        descriptors.merge(changed) { _, new in new }
         unpublished = [:]
         revision += 1
+        syncCore(changed: changed)
+    }
+
+    // Coalesce bursts of published descriptors into one incremental Rust sync.
+    // Only the new descriptors are captured, never the full library dictionary.
+    private func syncCore(changed: [String: VisualDescriptor]) {
+        coreSyncTask?.cancel()
+        let items = self.items
+        let favorites = self.favorites
+        coreSyncTask = Task(priority: .utility) {
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard !Task.isCancelled else { return }
+            await MosaicCoreStore.shared.upsert(
+                descriptors: changed, items: items, favorites: favorites)
+        }
     }
 
     private func restart() {
@@ -463,10 +525,20 @@ final class MosaicIndexer {
             if ContinuousClock.now - lastPublish > .seconds(4) {
                 lastPublish = .now
                 remaining = max(0, pending.count - cursor)
+                let elapsed = ContinuousClock.now - windowStart
+                if elapsed > .seconds(1) {
+                    let seconds =
+                        Double(elapsed.components.seconds)
+                        + Double(elapsed.components.attoseconds) / 1e18
+                    let rate = Int(Double(analyzedThisWindow) / max(seconds, 1) * 60)
+                    if rate != itemsPerMinute { itemsPerMinute = rate }
+                    analyzedThisWindow = 0
+                    windowStart = .now
+                }
                 publish()
             }
             // Re-encoding the whole cache is costly; checkpoint every few minutes.
-            if ContinuousClock.now - lastSave > .seconds(300) {
+            if ContinuousClock.now - lastSave > .seconds(600) {
                 lastSave = .now
                 await MosaicAnalysis.shared.save()
             }
@@ -481,11 +553,16 @@ final class MosaicIndexer {
     // Precise tagging runs after the fast pass, one item at a time, newest first. It is
     // the heaviest work Mosaic does, so it pauses on any warmth and goes slowly on battery.
     private func describeAll() async {
+        // Precise descriptions are expensive (one on-device model call per item).
+        // A 50k library would otherwise spend days in this pass. Index the most
+        // recent 4,000, where detailed tags are most useful; the fast tier still
+        // covers the whole library for search and similarity.
         let candidates = items.sorted { $0.date > $1.date }.filter { item in
-            guard !detailAttempted.contains(item.id), let descriptor = descriptors[item.id] ?? unpublished[item.id]
+            guard !detailAttempted.contains(item.id),
+                let descriptor = descriptors[item.id] ?? unpublished[item.id]
             else { return false }
             return descriptor.detailed != true
-        }
+        }.prefix(4_000)
         describable = described + candidates.count
         guard !candidates.isEmpty else { return }
         describing = true
@@ -503,7 +580,9 @@ final class MosaicIndexer {
             guard !Task.isCancelled else { return }
             if paused { paused = false }
             detailAttempted.insert(item.id)
-            guard let base = descriptors[item.id] ?? unpublished[item.id], base.detailed != true else { continue }
+            guard let base = descriptors[item.id] ?? unpublished[item.id], base.detailed != true else {
+                continue
+            }
             switch await MosaicAnalysis.detail(item, base: base, allowFileRead: false) {
             case .described(let detailed):
                 unpublished[item.id] = detailed
@@ -525,7 +604,7 @@ final class MosaicIndexer {
                 lastPublish = .now
                 publish()
             }
-            if ContinuousClock.now - lastSave > .seconds(300) {
+            if ContinuousClock.now - lastSave > .seconds(600) {
                 lastSave = .now
                 await MosaicAnalysis.shared.save()
             }
@@ -543,13 +622,15 @@ final class MosaicIndexer {
         return (true, charging ? .milliseconds(200) : .milliseconds(1500))
     }
 
-    // Width 0 means pause. Charging allows a little parallelism; battery never does.
+    // Width 0 means pause. Three workers on battery keep a 50k-library pass
+    // practical without pegging the performance cores; charging unlocks six.
+    // Thermal state still wins: a warm phone drops to one worker or pauses.
     static func pace(held: Bool) -> (width: Int, delay: Duration) {
         let info = ProcessInfo.processInfo
         if held || info.thermalState == .serious || info.thermalState == .critical { return (0, .zero) }
-        if info.thermalState == .fair || info.isLowPowerModeEnabled { return (1, .milliseconds(400)) }
+        if info.thermalState == .fair || info.isLowPowerModeEnabled { return (1, .milliseconds(250)) }
         UIDevice.current.isBatteryMonitoringEnabled = true
         let charging = [.charging, .full].contains(UIDevice.current.batteryState)
-        return charging ? (2, .milliseconds(20)) : (1, .milliseconds(120))
+        return charging ? (6, .milliseconds(8)) : (3, .milliseconds(30))
     }
 }
